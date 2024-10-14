@@ -1,0 +1,4 @@
+pysheds
+numpy
+matplotlib
+seaborn
