@@ -22,7 +22,7 @@ looseversion==1.3.0
 mercantile==1.2.1
 mpmath==1.2.1
 munkres==1.1.4
-numpy==1.21.0
+numpy==1.22.0
 openpyxl==3.0.10
 pandas==1.4.4
 patsy==0.5.2
