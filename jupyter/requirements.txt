@@ -1,4 +1,3 @@
-pysheds
-numpy
-matplotlib
-seaborn
+numpy==1.21.0
+pandas==1.4.4
+pysheds==0.4
