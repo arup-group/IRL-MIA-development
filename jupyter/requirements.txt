@@ -1,6 +1,8 @@
-scipy==1.9.1
 numpy==1.22
 pandas==1.4.4
 pysheds==0.4
-matplotlib
+scipy==1.9.1
 seaborn
+matplotlib
+shapely
+geopandas
