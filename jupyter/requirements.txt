@@ -6,3 +6,4 @@ seaborn
 matplotlib
 shapely
 geopandas
+mplleaflet
