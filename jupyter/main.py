@@ -14,14 +14,28 @@ import geopandas as gpd
 from shapely import geometry
 
 
-def main(file, aggregation, flow_file_path, burn_width, burn_value, river_network_min_flow_acc, min_total_pond_area):
+# key inputs
+# file = 'Terrain_Grant_Valkaria_ClipNoData_NAD83'
+# aggregation = 16
+# flow_file_path = 'IRL-Flowlines-Export_NAD83.shp'
+# burn_width=4
+# burn_value = -3  # Adjust this value as needed
+# river_network_min_flow_acc = 1000
+# min_total_pond_area = 20
+
+
+def main(file, epsg, units, aggregation, flow_file_path, burn_width, burn_value, river_network_min_flow_acc, min_total_pond_area, max_num_ponds):
 
     # PARAMETER - input DEM
     # Note, whatever CRS the tif is in will influence the units
     # Typically either NAD 1983 UTM Zone 17N - EPSG:26917
     # Or NAD 1983 HARN Florida GDL Albers (Meters) - EPSG:3087
 
+    # If testing locally, use path
     c_path = 'C:\\Users\\alden.summerville\\Documents\\dev-local\\IRL-MIA-development\\'
+    # If deployed, use relative paths
+    # c_path = ''
+
 
     # Import initial 1m resolution DEM (to be downsampled)
     file = file
@@ -34,8 +48,37 @@ def main(file, aggregation, flow_file_path, burn_width, burn_value, river_networ
     
     # Create a PDF file to save the plots
     from matplotlib.backends.backend_pdf import PdfPages
-    pdf_pages = PdfPages(f'{c_path}jupyter\\outputs\\Output_{file}_1.pdf')
-    pdf_path = f'{c_path}jupyter\\outputs\\Output_{file}_1.pdf'
+    import matplotlib.pyplot as plt
+    pdf_path = f'{c_path}jupyter\\outputs\\Output_{file}_{burn_value}Burn_{min_total_pond_area}MinTotPondArea_{max_num_ponds}MaxNumPonds.pdf'
+    pdf_pages = PdfPages(pdf_path)
+    
+    # Add user inputs as a page
+    # Create a new figure for the user inputs
+    plt.figure(figsize=(8, 6))
+    plt.axis('off')  # Turn off the axis
+
+    # Prepare the text to display
+    user_inputs_text = f"""
+    Report Parameters:
+
+    DEM File Name: {file}
+    EPSG Code: {epsg}
+    Units of DEM: {units}
+    DEM Aggregation Factor: {aggregation}
+    Clipped Flowlines Path: {flow_file_path}
+    Burn Width: {burn_width}
+    Burn Value: {burn_value}
+    Minimum Flow Accumulation - Channels: {river_network_min_flow_acc}
+    Minimum Total Pond Area per Microwatershed: {min_total_pond_area}
+    Max Number of Ponds per Microwatershed: {max_num_ponds}
+    """
+
+    # Add the text to the figure
+    plt.text(0.1, 0.5, user_inputs_text, fontsize=12, ha='left', va='center', wrap=True)
+
+    # Save the figure to the PDF
+    pdf_pages.savefig()
+    plt.close()
 
     
     # Reduce DEM resolution
@@ -93,13 +136,15 @@ def main(file, aggregation, flow_file_path, burn_width, burn_value, river_networ
 
     # Open the raster file
     with rasterio.open(dem_agg_path) as src:
-        dem_crs = src.crs
-        print(dem_crs)
+        crs_dem = src.crs
+        print(crs_dem)
 
 
     
     # set crs variable to whatever the crs is
-    crs = 26917
+    # for now, manually, becuase the rasterio lib isn't returning the CRS correctly for the FLA projection
+    crs_dem = epsg
+    # crs_dem = str(crs_dem).replace("EPSG:", "")
 
     
     # Confirm area units check out (square meters)
@@ -121,9 +166,12 @@ def main(file, aggregation, flow_file_path, burn_width, burn_value, river_networ
         # Calculate the total area
         total_area = valid_pixels * pixel_size
         
-        print(f'Total area: {total_area} square meters')
-        print(f'Total area: {total_area/4046.85642} acres')
-
+        if units == "Meters":
+            print(f'Total area: {total_area} square meters')
+            print(f'Total area: {total_area/4046.85642} acres')
+        elif units == "US Foot":
+            print(f'Total area: {total_area} square feet')
+            print(f'Total area: {total_area/43560} acres')
 
 
     
@@ -161,6 +209,8 @@ def main(file, aggregation, flow_file_path, burn_width, burn_value, river_networ
     # Load the flowlines dataset
     flow_file_path = 'IRL-Flowlines-Export_NAD83.shp'
     flowlines = gpd.read_file(fr'{c_path}jupyter\\data-inputs\\IRL-Flowlines\\{flow_file_path}')
+    flowlines.to_crs(epsg=crs_dem, inplace=True)
+
 
     burn_width=burn_width
     # PARAMETER: burn width
@@ -235,7 +285,7 @@ def main(file, aggregation, flow_file_path, burn_width, burn_value, river_networ
     #plt.imshow(dem, extent=grid.extent, cmap='terrain', zorder=1)
     plt.colorbar(label='Elevation (m)')
     plt.grid(zorder=0)
-    plt.title('Digital Elevation Map - 16m Burned', size=14)
+    plt.title(f'Digital Elevation Map - {aggregation}x{aggregation} - {burn_value} depth, {burn_width*2} wide Burn - EPSG:{crs_dem}, {units}', size=14)
     plt.xlabel('Longitude')
     plt.ylabel('Latitude')
     plt.tight_layout()
@@ -453,7 +503,7 @@ def main(file, aggregation, flow_file_path, burn_width, burn_value, river_networ
 
     # Create geodataframe of microwatersheds
     microwatersheds_gdf = gpd.GeoDataFrame({'geometry': geometries, 'value': values})
-    microwatersheds_gdf.set_crs(epsg=crs, inplace=True)
+    microwatersheds_gdf.set_crs(epsg=crs_dem, inplace=True)
     # print(microwatersheds_gdf)
 
     # Add title and show the combined plot
@@ -466,8 +516,8 @@ def main(file, aggregation, flow_file_path, burn_width, burn_value, river_networ
 
 
     # confirm crs
-    crs = microwatersheds_gdf.crs
-    print(crs)
+    # crs = microwatersheds_gdf.crs
+    # print(crs)
 
     
     # print(microwatersheds_gdf)
@@ -482,7 +532,10 @@ def main(file, aggregation, flow_file_path, burn_width, burn_value, river_networ
     # Add a simple numeric 'Microwatershed_ID' column starting at 1
     microwatersheds_gdf['Microwatershed_ID'] = range(1, len(microwatersheds_gdf) + 1)
     # Calculate the area of each polygon in acres (originally in square meters because of the CRS then divide by conversion factor)
-    microwatersheds_gdf['Area_Acres'] = microwatersheds_gdf['geometry'].area/4046.85642
+    if units == "Meters":
+        microwatersheds_gdf['Area_Acres'] = microwatersheds_gdf['geometry'].area/4046.85642
+    elif units == "US Foot":
+        microwatersheds_gdf['Area_Acres'] = microwatersheds_gdf['geometry'].area/43560
 
     print(microwatersheds_gdf)
 
@@ -509,10 +562,13 @@ def main(file, aggregation, flow_file_path, burn_width, burn_value, river_networ
     # Load ponds data
     # NOTE make sure to read in the shapefile with a CRS aligned with the DEM
     ponds = gpd.read_file(fr'{c_path}jupyter\\data-inputs\\IRL-Ponds-Export\\IRL-Ponds-Export_NAD83.shp')
-    # ponds.to_crs(epsg=crs, inplace=True)
+    ponds.to_crs(epsg=crs_dem, inplace=True)
 
     # Calculate the area of each pond
-    ponds['area'] = ponds.geometry.area/4046.85642
+    if units == "Meters":
+        ponds['area'] = ponds.geometry.area/4046.85642
+    elif units == "US Foot":
+        ponds['area'] = ponds.geometry.area/43560
 
     # NOTE Filter out ponds with an area less than 1 acre
     ponds = ponds[ponds['area'] >= 1]
@@ -526,8 +582,11 @@ def main(file, aggregation, flow_file_path, burn_width, burn_value, river_networ
     # Sum the area of intersecting ponds for each microwatershed
     pond_area_sum = ponds_intersect.groupby('index_right')['area'].sum().reset_index(name='Total_Pond_Area_Acres')
 
-    # Combine pond_counts and pond_area_sum into a single DataFrame
-    pond_summary = pond_counts.merge(pond_area_sum, on='index_right')
+    # Calculate the average pond area within each microwatershed
+    pond_area_avg = ponds_intersect.groupby('index_right')['area'].mean().reset_index(name='Average_Pond_Area_Acres')
+
+    # Combine pond_counts, pond_area_sum, and pond_area_avg into a single DataFrame
+    pond_summary = pond_counts.merge(pond_area_sum, on='index_right').merge(pond_area_avg, on='index_right')
 
     # Merge the combined summary DataFrame back into the microwatersheds_gdf
     microwatersheds_all_gdf = microwatersheds_gdf.merge(pond_summary, left_index=True, right_on='index_right', how='left')
@@ -535,13 +594,18 @@ def main(file, aggregation, flow_file_path, burn_width, burn_value, river_networ
     # Fill NaN values with 0 (if there are microwatersheds with no intersecting ponds)
     microwatersheds_all_gdf['Pond_Count'] = microwatersheds_all_gdf['Pond_Count'].fillna(0)
     microwatersheds_all_gdf['Total_Pond_Area_Acres'] = microwatersheds_all_gdf['Total_Pond_Area_Acres'].fillna(0)
+    microwatersheds_all_gdf['Average_Pond_Area_Acres'] = microwatersheds_all_gdf['Average_Pond_Area_Acres'].fillna(0)
+
+    # Calculate the ratio of total pond area to the area of the microwatershed
+    microwatersheds_all_gdf['Pond_Area_Ratio'] = microwatersheds_all_gdf['Total_Pond_Area_Acres'] / microwatersheds_all_gdf['Area_Acres'] *100
 
     # Select only the specified columns and order by Pond_Count
-    columns_to_display = ['Microwatershed_ID', 'Area_Acres', 'Pond_Count', 'Total_Pond_Area_Acres']
+    columns_to_display = ['Microwatershed_ID', 'Area_Acres', 'Pond_Count', 'Total_Pond_Area_Acres', 'Average_Pond_Area_Acres', 'Pond_Area_Ratio']
     summary_df = microwatersheds_all_gdf[columns_to_display].sort_values(by='Pond_Count', ascending=False)
 
     # Print the DataFrame
     print(summary_df)
+
 
 
     
@@ -554,6 +618,8 @@ def main(file, aggregation, flow_file_path, burn_width, burn_value, river_networ
     plt.xlim(grid.bbox[0], grid.bbox[2])
     plt.ylim(grid.bbox[1], grid.bbox[3])
     plt.gca().set_aspect('equal')
+    #plot DEM with high transparency
+    plt.imshow(dem, extent=grid.extent, cmap='terrain', norm=norm, zorder=1, alpha=0.25)
     microwatersheds_gdf.plot(ax=ax, aspect=1, cmap='tab20', edgecolor='white', alpha=0.5)
     # Plot ponds
     ponds_intersect.plot(ax=ax, aspect=1, color='blue', edgecolor='blue')
@@ -572,8 +638,8 @@ def main(file, aggregation, flow_file_path, burn_width, burn_value, river_networ
     min_total_pond_area = min_total_pond_area
     microwatersheds_filter_gdf = microwatersheds_all_gdf[microwatersheds_all_gdf['Total_Pond_Area_Acres'] >= min_total_pond_area]
     # Pond Count - second of importance (likely won't implement the tech on a high number of ponds)
-    max_pond_count = 10
-    # microwatersheds_filter_gdf = microwatersheds_filter_gdf[microwatersheds_filter_gdf['Pond_Count'] <= max_pond_count]
+    max_pond_count = max_num_ponds
+    microwatersheds_filter_gdf = microwatersheds_filter_gdf[microwatersheds_filter_gdf['Pond_Count'] <= max_pond_count]
     # MWS Area - less important (?) becuase a large area could still have favorable above characteristics
     max_mws_area = 500
     # microwatersheds_filter_gdf = microwatersheds_filter_gdf[microwatersheds_filter_gdf['Area_Acres'] <= max_mws_area]
@@ -587,6 +653,8 @@ def main(file, aggregation, flow_file_path, burn_width, burn_value, river_networ
     plt.ylim(grid.bbox[1], grid.bbox[3])
     plt.gca().set_aspect('equal')
     cmap = plt.get_cmap('tab20')
+    #plot DEM with high transparency
+    plt.imshow(dem, extent=grid.extent, cmap='terrain', norm=norm, zorder=1, alpha=0.25)
     microwatersheds_filter_gdf.plot(ax=ax, aspect=1, cmap='tab20', edgecolor='white', alpha=0.5)
     ponds_intersect.plot(ax=ax, aspect=1, color='blue', edgecolor='blue')
 
@@ -595,11 +663,11 @@ def main(file, aggregation, flow_file_path, burn_width, burn_value, river_networ
         plt.annotate(text=row['Microwatershed_ID'], xy=(row.geometry.centroid.x, row.geometry.centroid.y),
                     xytext=(3, 3), textcoords='offset points', fontsize=8, color='black')
 
-    plt.title(f'Microwatersheds - Minimum Total Pond Area {min_total_pond_area} Acres')
+    plt.title(f'Microwatersheds - Minimum Total Pond Area {min_total_pond_area} Acres. Max Number of Ponds {max_num_ponds}')
     plt.show()
 
-    # Select only the specified columns and order by Pond_Count
-    columns_to_display = ['Microwatershed_ID', 'Area_Acres', 'Pond_Count', 'Total_Pond_Area_Acres']
+    # Select only the specified columns and order by Total_Pond_Area_Acres
+    columns_to_display = ['Microwatershed_ID', 'Area_Acres', 'Pond_Count', 'Total_Pond_Area_Acres', 'Average_Pond_Area_Acres', 'Pond_Area_Ratio']
     filter_df = microwatersheds_filter_gdf[columns_to_display].sort_values(by='Total_Pond_Area_Acres', ascending=False)
 
     # Format the DataFrame columns
@@ -607,6 +675,8 @@ def main(file, aggregation, flow_file_path, burn_width, burn_value, river_networ
     filter_df['Pond_Count'] = filter_df['Pond_Count'].astype(int)  # No decimal places
     filter_df['Area_Acres'] = filter_df['Area_Acres'].map('{:.2f}'.format)  # Two decimal places
     filter_df['Total_Pond_Area_Acres'] = filter_df['Total_Pond_Area_Acres'].map('{:.2f}'.format)  # Two decimal places
+    filter_df['Average_Pond_Area_Acres'] = filter_df['Average_Pond_Area_Acres'].map('{:.2f}'.format)  # Two decimal places
+    filter_df['Pond_Area_Ratio'] = filter_df['Pond_Area_Ratio'].map('{:.4f}'.format)  # Four decimal places
 
     # Print the DataFrame
     print(filter_df.head(20))
@@ -619,13 +689,18 @@ def main(file, aggregation, flow_file_path, burn_width, burn_value, river_networ
     ax.axis('tight')
     ax.axis('off')
     table_data = filter_df.head(20).values  # Assuming filter_df is your DataFrame
-    columns = filter_df.columns.tolist()
+    columns = [col.replace('_', '\n') for col in filter_df.columns.tolist()]
     table = ax.table(cellText=table_data, colLabels=columns, cellLoc='center', loc='center')
     table.auto_set_font_size(False)
-    table.set_fontsize(10)
+    table.set_fontsize(8)
     table.scale(1.2, 1.2)  # Adjust the size of the table
-    pdf_pages.savefig(fig)  # Save the DataFrame table to the PDF
 
+    # Adjust header cell height if needed
+    for (i, j), cell in table.get_celld().items():
+        if i == 0:  # Header row
+            cell.set_height(0.12)  # Adjust height for better visibility
+
+    pdf_pages.savefig(fig)  # Save the DataFrame table to the PDF
     
     # Filter for a single MWS
 
@@ -697,19 +772,27 @@ def main(file, aggregation, flow_file_path, burn_width, burn_value, river_networ
 # Streamlit app layout
 st.title("Microwatershed Impact Assessment - Python Tool")
 
+# DEM file inputs
+dems = ["Terrain_Grant_Valkaria_ClipNoData_NAD83",
+        "UpperCanalMosa_1m_NAD83"]
+
 # User inputs
-file = st.text_input("Enter the DEM file name (without extension):", "Terrain_Grant_Valkaria_ClipNoData_NAD83")
-aggregation = st.number_input("DEM Aggregation Factor:", min_value=4, value=16)
-flow_file_path = st.text_input("Enter the clipped flowlines path:", "IRL-Flowlines-Export_NAD83.shp")
-burn_width = st.number_input("Burn Width:", min_value=1, value=4)
-burn_value = st.number_input("Burn Value:", value=-3)
+file = st.selectbox("Enter the DEM file name (without extension):", ["Terrain_Grant_Valkaria_ClipNoData_NAD83", "Terrain_Grant_Valkaria_ClipNoData_FLA", "PinedaScalgo_1m_NAD83", "Pineda_Scalgo_AggMedian16_NAD83", "Melbourne_NAD83", "Tomako_FLA", "UpperCanalMosa_1m_NAD83"])
+epsg = st.selectbox("Enter the EPSG code (2881 for StatePlane Florida East. 26917 for NAD83 Zone 17N):", ["26917", "2881"])
+units = st.selectbox("Enter the units of the DEM", ["Meters", "US Foot"])
+aggregation = st.number_input("DEM Aggregation Factor:", min_value=0, value=16)
+flow_file_path = st.selectbox("Enter the clipped flowlines path:", ["IRL-Flowlines-Export_NAD83.shp", "IRL-Pineda-Flowlines-Export_NAD83.shp", "IRL-UpperCanalFlowlines-Export_NAD83.shp"])
+burn_width = st.number_input("Burn Width:", min_value=1, value=3)
+burn_value = st.number_input("Burn Value:", value=-2)
 river_network_min_flow_acc = st.number_input("Minimum Flow Accumulation - Channels:", min_value=0, value=1000)
-min_total_pond_area = st.number_input("Minimum Total Pond Area - Microwatersheds:", min_value=0, value=20)
+min_total_pond_area = st.number_input("Minimum Total Pond Area per Microwatershed:", min_value=0, value=20)
+max_num_ponds = st.number_input("Max Number of Ponds per Microwatershed:", min_value=0, value=50)
+
 
 # Button to run the main function
 if st.button("Run"):
     with st.spinner("Running..."):
-        pdf_path = main(file, aggregation, flow_file_path, burn_width, burn_value, river_network_min_flow_acc, min_total_pond_area)
+        pdf_path = main(file, epsg, units, aggregation, flow_file_path, burn_width, burn_value, river_network_min_flow_acc, min_total_pond_area, max_num_ponds)
     st.success("Complete. A report with the key figures is saved to the outputs folder.")
     
     # Open the PDF file
