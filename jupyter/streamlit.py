@@ -12,7 +12,7 @@ import rasterio
 from collections import defaultdict
 import geopandas as gpd
 from shapely import geometry
-
+from streamlit_folium import st_folium
 
 # key inputs
 # file = 'Terrain_Grant_Valkaria_ClipNoData_NAD83'
@@ -22,6 +22,11 @@ from shapely import geometry
 # burn_value = -3  # Adjust this value as needed
 # river_network_min_flow_acc = 1000
 # min_total_pond_area = 20
+
+def read_reproject_dem():
+    pass
+
+
 
 
 def main(file, epsg, units, aggregation, flow_file_path, burn_width, burn_value, river_network_min_flow_acc, min_total_pond_area, max_num_ponds):
@@ -45,6 +50,56 @@ def main(file, epsg, units, aggregation, flow_file_path, burn_width, burn_value,
     grid_clip = Grid.from_raster(dem_path) # to be clipped by the delineation extent to preserve the original grid
     dem = grid.read_raster(dem_path)
 
+
+    # For the pysheds wrapper, convert to web mercator
+    import rasterio
+    import numpy as np
+    from rasterio.warp import calculate_default_transform, reproject, Resampling
+
+    # Open the source raster
+    with rasterio.open(dem_path) as src:
+        # Open the target raster (the one you want to match)
+        with rasterio.open("streamorder\\colorado_sample_dem.tiff") as dst:
+            # Calculate the transformation parameters
+            print(src.crs)
+            print(dst.crs)
+            transform, width, height = calculate_default_transform(
+                src.crs, dst.crs, src.width, src.height, *src.bounds
+            )
+
+            # Create an empty array for the reprojected data
+            reprojected_data = np.empty((src.count, height, width), dtype=src.dtypes[0])
+
+            # Reproject the data
+            reproject(
+                source=rasterio.band(src, 1),
+                destination=reprojected_data,
+                src_transform=src.transform,
+                src_crs=src.crs,
+                dst_transform=transform,
+                dst_crs=dst.crs,
+                resampling=Resampling.nearest  # Choose a suitable resampling method
+            )
+
+            # Save the reprojected raster
+            with rasterio.open(
+                "data-inputs\\temp_reprojected_raster.tif",
+                "w",
+                driver="GTiff",
+                width=width,
+                height=height,
+                count=src.count,
+                dtype=src.dtypes[0],
+                crs=dst.crs,
+                transform=transform,
+            ) as dst:
+                dst.write(reprojected_data)
+
+
+    dem_path = 'data-inputs\\temp_reprojected_raster.tif'
+    grid = Grid.from_raster(dem_path)
+    grid_clip = Grid.from_raster(dem_path) # to be clipped by the delineation extent to preserve the original grid
+    dem = grid.read_raster(dem_path)
     
     # Create a PDF file to save the plots
     from matplotlib.backends.backend_pdf import PdfPages
@@ -207,7 +262,7 @@ def main(file, epsg, units, aggregation, flow_file_path, burn_width, burn_value,
     import numpy as np
 
     # Load the flowlines dataset
-    flow_file_path = 'IRL-Flowlines-Export_NAD83.shp'
+    # flow_file_path = 'IRL-Flowlines-Export_NAD83.shp'
     flowlines = gpd.read_file(fr'{c_path}jupyter\\data-inputs\\IRL-Flowlines\\{flow_file_path}')
     flowlines.to_crs(epsg=crs_dem, inplace=True)
 
@@ -434,92 +489,120 @@ def main(file, epsg, units, aggregation, flow_file_path, burn_width, burn_value,
 
 
     
-    # Delineate MICROWATERSHEDS
+    # # Delineate MICROWATERSHEDS
 
-    #unproj DEM
-    import numpy as np
-    import matplotlib.pyplot as plt
-    import matplotlib.colors as mcolors
-    import geopandas as gpd
-    from shapely.geometry import shape
-    from rasterio.features import shapes
+    # #unproj DEM
+    # import numpy as np
+    # import matplotlib.pyplot as plt
+    # import matplotlib.colors as mcolors
+    # import geopandas as gpd
+    # from shapely.geometry import shape
+    # from rasterio.features import shapes
 
-    # Create a figure for plotting all catchments
-    fig, ax = plt.subplots(figsize=(8,6))
+    # # Create a figure for plotting all catchments
+    # fig, ax = plt.subplots(figsize=(8,6))
 
-    # Set the plot boundaries and aspect ratio
-    plt.xlim(grid.bbox[0], grid.bbox[2])
-    plt.ylim(grid.bbox[1], grid.bbox[3])
-    plt.gca().set_aspect('equal')
+    # # Set the plot boundaries and aspect ratio
+    # plt.xlim(grid.bbox[0], grid.bbox[2])
+    # plt.ylim(grid.bbox[1], grid.bbox[3])
+    # plt.gca().set_aspect('equal')
 
-    # Define colormap for unique catchment colors
-    colors = plt.cm.get_cmap('tab20b', len(junctions))
+    # # Define colormap for unique catchment colors
+    # colors = plt.cm.get_cmap('tab20b', len(junctions))
 
-    # INPUT PARAMETER: Define the minimum and maximum accumulation thresholds
-    mws_min_flow_acc = 1
-    mws_max_flow_acc = 500000
+    # # INPUT PARAMETER: Define the minimum and maximum accumulation thresholds
+    # mws_min_flow_acc = 1
+    # mws_max_flow_acc = 500000
 
-    # Initialize an empty list to store microwatersheds vectors
-    geometries = []
-    values = []
+    # # Initialize an empty list to store microwatersheds vectors
+    # geometries = []
+    # values = []
 
-    # Loop over each junction and plot its catchment
-    for i, junction in enumerate(junctions):
-        x, y = junction
+    # # Loop over each junction and plot its catchment
+    # for i, junction in enumerate(junctions):
+    #     x, y = junction
         
-        # Snap the junction to the nearest cell where accumulation is between min_acc and max_acc
-        mask = (acc > mws_min_flow_acc) & (acc < mws_max_flow_acc)
-        x_snap, y_snap = grid.snap_to_mask(mask, (x, y))
+    #     # Snap the junction to the nearest cell where accumulation is between min_acc and max_acc
+    #     mask = (acc > mws_min_flow_acc) & (acc < mws_max_flow_acc)
+    #     x_snap, y_snap = grid.snap_to_mask(mask, (x, y))
         
-        # Delineate the catchment for the snapped point
-        catch = grid.catchment(x=x_snap, y=y_snap, fdir=fdir, dirmap=dirmap, xytype='coordinate')
-        # print(type(catch))
+    #     # Delineate the catchment for the snapped point
+    #     catch = grid.catchment(x=x_snap, y=y_snap, fdir=fdir, dirmap=dirmap, xytype='coordinate')
+    #     # print(type(catch))
         
-        # Convert the catchment to vector and add to list (to be transformed into a gdf)
-        data = catch.astype(np.float32)
-        transform = catch.affine
-        mask = data != catch.nodata
-        # Extract shapes (vector geometries) from the raster
-        shapes_generator = shapes(data, mask=mask, transform=transform)
-        # print(shapes_generator)
-        # Convert shapes to Shapely geometries
-        for geom, value in shapes_generator:
-            geometries.append(shape(geom))
-            values.append(value)
+    #     # Convert the catchment to vector and add to list (to be transformed into a gdf)
+    #     data = catch.astype(np.float32)
+    #     transform = catch.affine
+    #     mask = data != catch.nodata
+    #     # Extract shapes (vector geometries) from the raster
+    #     shapes_generator = shapes(data, mask=mask, transform=transform)
+    #     # print(shapes_generator)
+    #     # Convert shapes to Shapely geometries
+    #     for geom, value in shapes_generator:
+    #         geometries.append(shape(geom))
+    #         values.append(value)
         
-        # Plot the catchment with a unique color
-        plt.imshow(np.where(catch, catch, np.nan), extent=grid.extent, cmap=mcolors.ListedColormap([colors(i)]), alpha=0.5)
+    #     # Plot the catchment with a unique color
+    #     plt.imshow(np.where(catch, catch, np.nan), extent=grid.extent, cmap=mcolors.ListedColormap([colors(i)]), alpha=0.5)
 
-    # Plot the river network on top of the catchments
-    for branch in branches['features']:
-        line = np.asarray(branch['geometry']['coordinates'])
-        plt.plot(line[:, 0], line[:, 1], color='black')
+    # # Plot the river network on top of the catchments
+    # for branch in branches['features']:
+    #     line = np.asarray(branch['geometry']['coordinates'])
+    #     plt.plot(line[:, 0], line[:, 1], color='black')
 
-    # Highlight all junction points
-    x, y = zip(*junctions)
-    plt.scatter(x, y, color='red', s=5, zorder=5)
+    # # Highlight all junction points
+    # x, y = zip(*junctions)
+    # plt.scatter(x, y, color='red', s=5, zorder=5)
 
-    # im3 = ax.imshow(flats, extent=grid.extent, zorder=3, cmap='Greys_r', alpha=0.6)
+    # # im3 = ax.imshow(flats, extent=grid.extent, zorder=3, cmap='Greys_r', alpha=0.6)
 
-    # Create geodataframe of microwatersheds
-    microwatersheds_gdf = gpd.GeoDataFrame({'geometry': geometries, 'value': values})
-    microwatersheds_gdf.set_crs(epsg=crs_dem, inplace=True)
-    # print(microwatersheds_gdf)
+    # # Create geodataframe of microwatersheds
+    # microwatersheds_gdf = gpd.GeoDataFrame({'geometry': geometries, 'value': values})
+    # microwatersheds_gdf.set_crs(epsg=crs_dem, inplace=True)
+    # # print(microwatersheds_gdf)
 
-    # Add title and show the combined plot
-    plt.title('Microwatersheds - Delineated from Channel Junction Points')
-    plt.show()
+    # # Add title and show the combined plot
+    # plt.title('Microwatersheds - Delineated from Channel Junction Points')
+    # plt.show()
 
-    # Save plot to pdf
-    pdf_pages.savefig(fig)
-
-
+    # # Save plot to pdf
+    # pdf_pages.savefig(fig)
 
     # confirm crs
     # crs = microwatersheds_gdf.crs
     # print(crs)
 
-    
+    # NEW METHOD to delineate the catchments and stream orders 
+    import folium
+    import make_catchments
+
+    basins_, branches_ = make_catchments.generate_catchments(dem_path,acc_thresh=river_network_min_flow_acc,so_filter=4)
+
+    # Visualize output
+    mws_with_stream_order = basins_.copy()
+    # mws_with_stream_order
+
+    # To use the basins wrapper output (switch the use the gdf)
+
+    microwatersheds_gdf = mws_with_stream_order
+
+    # Create a figure for plotting all catchments
+    fig, ax = plt.subplots(figsize=(8,6))
+    plt.imshow(dem, extent=grid.extent, cmap='terrain', norm=norm, zorder=1, alpha=0.25)
+    # Set the plot boundaries and aspect ratio
+    plt.xlim(grid.bbox[0], grid.bbox[2])
+    plt.ylim(grid.bbox[1], grid.bbox[3])
+    plt.gca().set_aspect('equal')
+    mws_with_stream_order.plot(ax=ax, aspect=1, cmap='tab20', edgecolor='white', alpha=0.5)
+    branches_.plot(ax=ax, aspect=1, color='black')
+    # Plot ponds
+    # Add title and show the combined plot
+    plt.title('Microwatersheds - Delineated from Channel Junction Points')
+    plt.show()
+    # Save plot to pdf
+    pdf_pages.savefig(fig)
+
+
     # print(microwatersheds_gdf)
     fig, ax = plt.subplots()
     microwatersheds_gdf.plot(ax=ax, aspect=1, cmap='tab20', edgecolor='black', alpha=0.7)
@@ -531,11 +614,26 @@ def main(file, epsg, units, aggregation, flow_file_path, burn_width, burn_value,
 
     # Add a simple numeric 'Microwatershed_ID' column starting at 1
     microwatersheds_gdf['Microwatershed_ID'] = range(1, len(microwatersheds_gdf) + 1)
-    # Calculate the area of each polygon in acres (originally in square meters because of the CRS then divide by conversion factor)
-    if units == "Meters":
-        microwatersheds_gdf['Area_Acres'] = microwatersheds_gdf['geometry'].area/4046.85642
-    elif units == "US Foot":
-        microwatersheds_gdf['Area_Acres'] = microwatersheds_gdf['geometry'].area/43560
+    
+    # Reproject to a suitable projected CRS (e.g., UTM Zone 17N)
+    microwatersheds_gdf_projected = microwatersheds_gdf.to_crs(epsg=26917)
+    # Calculate area in square meters
+    microwatersheds_gdf_projected['Area_SqMeters'] = microwatersheds_gdf_projected['BasinGeo'].area
+
+    # Convert to acres
+    microwatersheds_gdf_projected['Area_Acres'] = microwatersheds_gdf_projected['Area_SqMeters'] / 4046.85642
+
+    # Create a new GeoDataFrame with the original ID and the calculated area
+    area_acres_gdf = microwatersheds_gdf_projected[['Microwatershed_ID', 'Area_Acres']]
+
+    # Join the 'Area_Acres' field back to the original GeoDataFrame using the original ID
+    microwatersheds_gdf = microwatersheds_gdf.merge(area_acres_gdf, on='Microwatershed_ID')
+    
+    # # OLD Calculate the area of each polygon in acres (originally in square meters because of the CRS then divide by conversion factor)
+    # if units == "Meters":
+    #     microwatersheds_gdf['Area_Acres'] = microwatersheds_gdf['geometry'].area/4046.85642
+    # elif units == "US Foot":
+    #     microwatersheds_gdf['Area_Acres'] = microwatersheds_gdf['geometry'].area/43560
 
     print(microwatersheds_gdf)
 
@@ -545,9 +643,9 @@ def main(file, epsg, units, aggregation, flow_file_path, burn_width, burn_value,
     microwatersheds_gdf.plot(ax=ax, aspect=1, cmap='tab20', edgecolor='black', alpha=0.5)
 
     # Add labels
-    for idx, row in microwatersheds_gdf.iterrows():
-        plt.annotate(text=row['Microwatershed_ID'], xy=(row.geometry.centroid.x, row.geometry.centroid.y),
-                    xytext=(3, 3), textcoords='offset points', fontsize=8, color='black')
+    # for idx, row in microwatersheds_gdf.iterrows():
+    #     plt.annotate(text=row['Microwatershed_ID'], xy=(row.geometry.centroid.x, row.geometry.centroid.y),
+    #                 xytext=(3, 3), textcoords='offset points', fontsize=8, color='black')
 
     plt.show()
 
@@ -561,17 +659,35 @@ def main(file, epsg, units, aggregation, flow_file_path, burn_width, burn_value,
 
     # Load ponds data
     # NOTE make sure to read in the shapefile with a CRS aligned with the DEM
-    ponds = gpd.read_file(fr'{c_path}jupyter\\data-inputs\\IRL-Ponds-Export\\IRL-Ponds-Export_NAD83.shp')
-    ponds.to_crs(epsg=crs_dem, inplace=True)
+    ponds = gpd.read_file(fr'{c_path}jupyter\\data-inputs\\IRL-Ponds-Export\\IRL-Ponds-Export_4269.shp')
+    # ponds.to_crs(epsg=crs_dem, inplace=True)
 
-    # Calculate the area of each pond
-    if units == "Meters":
-        ponds['area'] = ponds.geometry.area/4046.85642
-    elif units == "US Foot":
-        ponds['area'] = ponds.geometry.area/43560
+    # Reproject to a suitable projected CRS (e.g., UTM Zone 17N)
+    ponds_projected = ponds.to_crs(epsg=26917)
+
+    # Calculate area in square meters
+    ponds_projected['Area_SqMeters'] = ponds_projected.geometry.area
+
+    # Convert to acres
+    ponds_projected['area'] = ponds_projected['Area_SqMeters'] / 4046.85642
+
+    # Create a unique Pond_ID for each pond
+    ponds_projected['Pond_ID'] = range(1, len(ponds_projected) + 1)
+
+    # Create a new GeoDataFrame with Pond_ID and Area_Acres
+    area_acres_gdf = ponds_projected[['Pond_ID', 'area']]
+
+    # Merge the area data back to the original GeoDataFrame using Pond_ID
+    ponds = ponds.merge(area_acres_gdf, on='Pond_ID', how='left')
+    
+    # # OLD Calculate the area of each pond
+    # if units == "Meters":
+    #     ponds['area'] = ponds.geometry.area/4046.85642
+    # elif units == "US Foot":
+    #     ponds['area'] = ponds.geometry.area/43560
 
     # NOTE Filter out ponds with an area less than 1 acre
-    ponds = ponds[ponds['area'] >= 1]
+    ponds = ponds[ponds['area'] >= 0.25]
 
     # Find intersecting ponds
     ponds_intersect = gpd.sjoin(ponds, microwatersheds_gdf, how='inner', predicate='intersects')
@@ -600,7 +716,7 @@ def main(file, epsg, units, aggregation, flow_file_path, burn_width, burn_value,
     microwatersheds_all_gdf['Pond_Area_Ratio'] = microwatersheds_all_gdf['Total_Pond_Area_Acres'] / microwatersheds_all_gdf['Area_Acres'] *100
 
     # Select only the specified columns and order by Pond_Count
-    columns_to_display = ['Microwatershed_ID', 'Area_Acres', 'Pond_Count', 'Total_Pond_Area_Acres', 'Average_Pond_Area_Acres', 'Pond_Area_Ratio']
+    columns_to_display = ['Microwatershed_ID', 'Area_Acres', 'Order', 'Pond_Count', 'Total_Pond_Area_Acres', 'Average_Pond_Area_Acres', 'Pond_Area_Ratio']
     summary_df = microwatersheds_all_gdf[columns_to_display].sort_values(by='Pond_Count', ascending=False)
 
     # Print the DataFrame
@@ -659,9 +775,9 @@ def main(file, epsg, units, aggregation, flow_file_path, burn_width, burn_value,
     ponds_intersect.plot(ax=ax, aspect=1, color='blue', edgecolor='blue')
 
     # Add labels
-    for idx, row in microwatersheds_filter_gdf.iterrows():
-        plt.annotate(text=row['Microwatershed_ID'], xy=(row.geometry.centroid.x, row.geometry.centroid.y),
-                    xytext=(3, 3), textcoords='offset points', fontsize=8, color='black')
+    # for idx, row in microwatersheds_filter_gdf.iterrows():
+    #     plt.annotate(text=row['Microwatershed_ID'], xy=(row.geometry.centroid.x, row.geometry.centroid.y),
+    #                 xytext=(3, 3), textcoords='offset points', fontsize=8, color='black')
 
     plt.title(f'Microwatersheds - Minimum Total Pond Area {min_total_pond_area} Acres. Max Number of Ponds {max_num_ponds}')
     plt.show()
@@ -717,9 +833,9 @@ def main(file, epsg, units, aggregation, flow_file_path, burn_width, burn_value,
     ponds_intersect.plot(ax=ax, aspect=1, color='blue', edgecolor='black')
 
     # Add labels
-    for idx, row in microwatersheds_inspect_gdf.iterrows():
-        plt.annotate(text=row['Microwatershed_ID'], xy=(row.geometry.centroid.x, row.geometry.centroid.y),
-                    xytext=(3, 3), textcoords='offset points', fontsize=8, color='black')
+    # for idx, row in microwatersheds_inspect_gdf.iterrows():
+    #     plt.annotate(text=row['Microwatershed_ID'], xy=(row.geometry.centroid.x, row.geometry.centroid.y),
+    #                 xytext=(3, 3), textcoords='offset points', fontsize=8, color='black')
 
     plt.show()
 
@@ -765,8 +881,35 @@ def main(file, epsg, units, aggregation, flow_file_path, burn_width, burn_value,
     
     # Close the PDF file
     pdf_pages.close()
+
+
+    # Folium plotting
+    from streamlit_folium import st_folium
+
+    # Select only the specified columns and order by Pond_Count
+    columns_to_display = ['Pond_ID', 'area', 'geometry']
+    ponds_simple = ponds_intersect[columns_to_display].sort_values(by='area', ascending=False)
     
-    return pdf_path
+    # separate by stream order
+    ones = microwatersheds_all_gdf[microwatersheds_all_gdf['Order']==1]
+    twos = microwatersheds_all_gdf[microwatersheds_all_gdf['Order']==2]
+    threes = microwatersheds_all_gdf[microwatersheds_all_gdf['Order']==3] # skip fours
+
+    # Map 'em!
+    cols = ['Microwatershed_ID', 'Area_Acres', 'Order', 'Pond_Count', 'Total_Pond_Area_Acres', 'Average_Pond_Area_Acres', 'Pond_Area_Ratio', 'BasinGeo']
+    cols_branches = ['Index','Length','Relief','Order','Slope','geometry','LocalPP_X','LocalPP_Y','Final_Chain_Val']
+    # pond_cols = ['Pond_ID', 'area']
+
+    m = folium.Map(location=[28.205, -80.70], zoom_start=10)  # Set your initial location
+    branches_[cols_branches].explore(m=m, color='black')
+    ones[cols].explore(m=m,color='green',tiles='Stamen Terrain')
+    twos[cols].explore(m=m,color='purple',tiles='Stamen Terrain')
+    threes[cols].explore(m=m,color='yellow',tiles='Stamen Terrain')
+    ponds_simple.explore(m=m, color='blue', tiles='Stamen Terrain')
+    folium.LayerControl().add_to(m) 
+    # m
+
+    return pdf_path, m
 
 
 # Streamlit app layout
@@ -777,7 +920,7 @@ dems = ["Terrain_Grant_Valkaria_ClipNoData_NAD83",
         "UpperCanalMosa_1m_NAD83"]
 
 # User inputs
-file = st.selectbox("Enter the DEM file name (without extension):", ["Terrain_Grant_Valkaria_ClipNoData_NAD83", "Terrain_Grant_Valkaria_ClipNoData_FLA", "PinedaScalgo_1m_NAD83", "Pineda_Scalgo_AggMedian16_NAD83", "Melbourne_NAD83", "Tomako_FLA", "UpperCanalMosa_1m_NAD83"])
+file = st.selectbox("Enter the DEM file name (without extension):", ["Terrain_Grant_Valkaria_ClipNoData_NAD83", "Terrain_Grant_Valkaria_ClipNoData_FLA", "PinedaScalgo_1m_NAD83", "Pineda_Scalgo_AggMedian16_NAD83", "Pineda_Scalgo_8m_NAD83", "Melbourne_NAD83", "Tomako_FLA", "UpperCanalMosa_1m_NAD83"])
 epsg = st.selectbox("Enter the EPSG code (2881 for StatePlane Florida East. 26917 for NAD83 Zone 17N):", ["26917", "2881"])
 units = st.selectbox("Enter the units of the DEM", ["Meters", "US Foot"])
 aggregation = st.number_input("DEM Aggregation Factor:", min_value=0, value=16)
@@ -792,7 +935,7 @@ max_num_ponds = st.number_input("Max Number of Ponds per Microwatershed:", min_v
 # Button to run the main function
 if st.button("Run"):
     with st.spinner("Running..."):
-        pdf_path = main(file, epsg, units, aggregation, flow_file_path, burn_width, burn_value, river_network_min_flow_acc, min_total_pond_area, max_num_ponds)
+        pdf_path, m = main(file, epsg, units, aggregation, flow_file_path, burn_width, burn_value, river_network_min_flow_acc, min_total_pond_area, max_num_ponds)
     st.success("Complete. A report with the key figures is saved to the outputs folder.")
     
     # Open the PDF file
@@ -804,3 +947,11 @@ if st.button("Run"):
             # subprocess.call(['xdg-open', pdf_path])  # Linux
     else:
         st.error("The PDF file was not found.")
+
+    # Store the map in session state
+    # st.session_state.map = m
+
+
+# # Render the map if it exists in session state
+# if 'map' in st.session_state:
+#     st_folium(st.session_state.map, width=700, height=500)
