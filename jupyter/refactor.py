@@ -449,7 +449,46 @@ def plot_pond_overlay(grid, dem, microwatersheds_gdf, pond_summary, pdf_pages):
 
     return pdf_pages
 
-def filter_mws_characteristics(microwatersheds_all_gdf, grid, dem, pond_summary, pdf_pages):
+def summarize_within(overlay_gdf, microwatersheds_gdf, column_name):
+    # Ensure both GeoDataFrames have the same coordinate reference system
+    if overlay_gdf.crs != microwatersheds_gdf.crs:
+        overlay_gdf = overlay_gdf.to_crs(microwatersheds_gdf.crs)
+
+    # Drop 'index_right' if it exists in microwatersheds_gdf
+    if 'index_right' in microwatersheds_gdf.columns:
+        microwatersheds_gdf = microwatersheds_gdf.drop(columns=['index_right'])
+
+    # Spatial join to find which overlay fall within each microwatershed
+    joined = gpd.sjoin(microwatersheds_gdf, overlay_gdf, how="left", predicate='intersects')
+
+    # Check if 'geometry_right' exists before accessing it
+    if 'geometry_right' in joined.columns:
+        joined['intersection_area'] = joined.geometry.intersection(joined['geometry_right']).area
+    else:
+        # Handle case where geometry_right does not exist
+        joined['intersection_area'] = joined.geometry.area
+
+    # Calculate the area-weighted nutrient value for each intersection
+    joined['weighted_value'] = joined[column_name] * joined['intersection_area']
+
+    # Summarize the weighted values and total intersection areas within each microwatershed
+    summary = joined.groupby(joined.index).agg({
+        'weighted_value': 'sum',
+        'intersection_area': 'sum'
+    }).reset_index()
+
+    # Calculate the area-weighted average nutrient value for each microwatershed
+    summary['area_weighted_avg'] = summary['weighted_value'] / summary['intersection_area']
+
+    # Merge the summary back to the microwatersheds GeoDataFrame
+    microwatersheds_summary = microwatersheds_gdf.merge(summary[['index', 'area_weighted_avg']], left_index=True, right_on='index', how='left')
+
+    # Rename the summarized column for clarity
+    microwatersheds_summary.rename(columns={'area_weighted_avg': f'Avg_{column_name}'}, inplace=True)
+
+    return microwatersheds_summary
+
+def filter_mws_characteristics(microwatersheds_all_gdf, grid, dem, ponds_intersect, pdf_pages, min_total_pond_area, max_num_ponds):
     # Filter MWS characteristics
 
     # Total Pond Area - likely the most important
@@ -486,7 +525,7 @@ def filter_mws_characteristics(microwatersheds_all_gdf, grid, dem, pond_summary,
     plt.show()
 
     # Select only the specified columns and order by Total_Pond_Area_Acres
-    columns_to_display = ['Microwatershed_ID', 'Area_Acres', 'Pond_Count', 'Total_Pond_Area_Acres', 'Average_Pond_Area_Acres', 'Pond_Area_Ratio']
+    columns_to_display = ['Microwatershed_ID', 'Area_Acres', 'Pond_Count', 'Total_Pond_Area_Acres', 'Average_Pond_Area_Acres', 'Pond_Area_Ratio', 'Avg_SUM_Annu_5']
     filter_df = microwatersheds_filter_gdf[columns_to_display].sort_values(by='Total_Pond_Area_Acres', ascending=False)
 
     # Format the DataFrame columns
@@ -495,7 +534,9 @@ def filter_mws_characteristics(microwatersheds_all_gdf, grid, dem, pond_summary,
     filter_df['Area_Acres'] = filter_df['Area_Acres'].map('{:.2f}'.format)  # Two decimal places
     filter_df['Total_Pond_Area_Acres'] = filter_df['Total_Pond_Area_Acres'].map('{:.2f}'.format)  # Two decimal places
     filter_df['Average_Pond_Area_Acres'] = filter_df['Average_Pond_Area_Acres'].map('{:.2f}'.format)  # Two decimal places
-    filter_df['Pond_Area_Ratio'] = filter_df['Pond_Area_Ratio'].map('{:.4f}'.format)  # Four decimal places
+    filter_df['Pond_Area_Ratio'] = filter_df['Pond_Area_Ratio'].map('{:.2f}'.format)  # Four decimal places
+    filter_df['Total_Nitrogen_(Lb/Yr)'] = filter_df['Avg_SUM_Annu_5'].map('{:.2f}'.format)  # Four decimal places
+    filter_df = filter_df.drop(columns=['Avg_SUM_Annu_5'])
 
     # Print the DataFrame
     print(filter_df.head(20))
@@ -533,8 +574,8 @@ def interactive_map(pond_summary, microwatersheds_all_gdf, branches_):
     from streamlit_folium import st_folium
 
     # Select only the specified columns and order by Pond_Count
-    columns_to_display = ['Pond_ID', 'area', 'geometry']
-    ponds_simple = pond_summary[columns_to_display].sort_values(by='area', ascending=False)
+    columns_to_display = ['Pond_ID', 'Area_Acres_right', 'geometry']
+    ponds_simple = ponds_intersect[columns_to_display].sort_values(by='Area_Acres_right', ascending=False)
     
     # separate by stream order
     ones = microwatersheds_all_gdf[microwatersheds_all_gdf['Order']==1]
@@ -589,11 +630,15 @@ def main(file, epsg, units, aggregation, flow_file_path, burn_width, burn_value,
 
     pdf_pages = plot_pond_overlay(grid, dem, microwatersheds_gdf, pond_summary, pdf_pages)
 
-    pdf_pages, filter_df = filter_mws_characteristics(microwatersheds_all_gdf, grid, dem, pond_summary, pdf_pages)
+    # Load nutrients layer
+    nutrients = gpd.read_file(r'data-inputs\\Nutrients\\Nutrients_Brevard_4269.shp')
+    microwatersheds_nutrients_gdf = summarize_within(nutrients, microwatersheds_all_gdf, 'SUM_Annu_5')
+
+    pdf_pages, filter_df = filter_mws_characteristics(microwatersheds_nutrients_gdf, grid, dem, ponds_intersect, pdf_pages, min_total_pond_area, max_num_ponds)
 
     close_pdf(pdf_pages)
 
-    interactive_map(pond_summary, microwatersheds_all_gdf, branches_)
+    m = interactive_map(ponds_intersect, microwatersheds_nutrients_gdf, branches_)
 
     return pdf_path, m
 

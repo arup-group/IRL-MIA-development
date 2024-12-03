@@ -166,10 +166,17 @@ def generate_catchments(path,acc_thresh=100,so_filter=3,
     # make river network
     print('Generating stream network...')
     branches = grid.extract_river_network(fdir=fdir,mask=mask) # returns geojson
+
+    print("reading in shorelines")
+    # Load the shorelines dataset
+    shoreline = gpd.read_file(r'data-inputs\\FLA-Shoreline\\FLA-Shoreline_4269.shp')
     
     # make main GeoDataFrame -- the indices here will match those of all profile
     # and connection lists that follow
-    branch_gdf = gpd.GeoDataFrame.from_features(branches,crs='epsg:4326')
+    branch_gdf_i = gpd.GeoDataFrame.from_features(branches,crs='epsg:4326')
+
+    branch_gdf = gpd.clip(branch_gdf_i, shoreline)
+    print("post clip")
     
     # generate profiles for each individual segment
     profiles, connections = grid.extract_profiles(fdir=fdir,mask=mask,include_endpoint=False)
