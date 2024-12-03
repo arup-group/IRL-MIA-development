@@ -2,4 +2,6 @@
 venv
 venv39
 venv39_2
+venv39_dash
 /jupyter/data-inputs/
+/jupyter/outputs/shp

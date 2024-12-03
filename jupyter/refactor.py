@@ -12,7 +12,7 @@ import rasterio
 from collections import defaultdict
 import geopandas as gpd
 from shapely import geometry
-from streamlit_folium import st_folium
+# from streamlit_folium import st_folium
 
 # sample inputs
 # file = 'Terrain_Grant_Valkaria_ClipNoData_NAD83'
@@ -277,7 +277,7 @@ def plot_burned_dem(dem, grid, pdf_pages, crs_dem, aggregation, burn_value, burn
     #plt.imshow(dem, extent=grid.extent, cmap='terrain', zorder=1)
     plt.colorbar(label='Elevation (m)')
     plt.grid(zorder=0)
-    plt.title(f'Digital Elevation Map - {aggregation}x{aggregation} - {burn_value} depth, {burn_width*2} wide Burn - EPSG:{crs_dem}, {units}', size=14)
+    plt.title(f'Digital Elevation Map - {aggregation}x{aggregation} - {burn_value} depth, {burn_width*2} wide Burn', size=14)
     plt.xlabel('Longitude')
     plt.ylabel('Latitude')
     plt.tight_layout()
@@ -291,7 +291,7 @@ def delineate_microwatersheds(dem_agg_burn_path, river_network_min_flow_acc):
     # NEW METHOD to delineate the catchments and stream orders 
     import make_catchments
 
-    basins_, branches_ = make_catchments.generate_catchments(dem_agg_burn_path,acc_thresh=river_network_min_flow_acc,so_filter=4)
+    basins_, branches_ = make_catchments.generate_catchments(dem_agg_burn_path,acc_thresh=river_network_min_flow_acc,so_filter=4, shoreline_clip=True)
 
     # Visualize output
     mws_with_stream_order = basins_.copy()
@@ -415,10 +415,13 @@ def overlay_ponds(c_path, microwatersheds_gdf):
     microwatersheds_all_gdf['Average_Pond_Area_Acres'] = microwatersheds_all_gdf['Average_Pond_Area_Acres'].fillna(0)
 
     # Calculate the ratio of total pond area to the area of the microwatershed
-    microwatersheds_all_gdf['Pond_Area_Ratio'] = microwatersheds_all_gdf['Total_Pond_Area_Acres'] / microwatersheds_all_gdf['Area_Acres'] *100
+    microwatersheds_all_gdf['Pond_Area_Percentage'] = microwatersheds_all_gdf['Total_Pond_Area_Acres'] / microwatersheds_all_gdf['Area_Acres'] *100
+
+    # Calculate volume
+    microwatersheds_all_gdf['Pond_Controllable_Volume_Ac-Ft'] = 0.6431378064 + 2.5920596874*microwatersheds_all_gdf['Total_Pond_Area_Acres']
 
     # Select only the specified columns and order by Pond_Count
-    columns_to_display = ['Microwatershed_ID', 'Area_Acres', 'Order', 'Pond_Count', 'Total_Pond_Area_Acres', 'Average_Pond_Area_Acres', 'Pond_Area_Ratio']
+    columns_to_display = ['Microwatershed_ID', 'Area_Acres', 'Order', 'Pond_Count', 'Total_Pond_Area_Acres', 'Average_Pond_Area_Acres', 'Pond_Area_Percentage']
     summary_df = microwatersheds_all_gdf[columns_to_display].sort_values(by='Pond_Count', ascending=False)
 
     # Print the DataFrame
@@ -436,7 +439,7 @@ def plot_pond_overlay(grid, dem, microwatersheds_gdf, pond_summary, pdf_pages):
     plt.gca().set_aspect('equal')
     #plot DEM with high transparency
     plt.imshow(dem, extent=grid.extent, cmap='terrain', norm=norm, zorder=1, alpha=0.25)
-    microwatersheds_gdf.plot(ax=ax, aspect=1, cmap='tab20', edgecolor='white', alpha=0.5)
+    microwatersheds_gdf.plot(ax=ax, aspect=1, cmap='tab20', edgecolor='black', alpha=0.5)
     # Plot ponds
     pond_summary.plot(ax=ax, aspect=1, color='blue', edgecolor='blue')
 
@@ -462,8 +465,11 @@ def filter_mws_characteristics(microwatersheds_all_gdf, grid, dem, pond_summary,
     max_mws_area = 500
     # microwatersheds_filter_gdf = microwatersheds_filter_gdf[microwatersheds_filter_gdf['Area_Acres'] <= max_mws_area]
 
-    # Print MWS and intersecting ponds
+    # Filter out order 3 catchments (the largest order)
+    microwatersheds_filter_gdf = microwatersheds_filter_gdf[microwatersheds_filter_gdf['Order'] != 3]
 
+    # Print MWS and intersecting ponds
+    from matplotlib import colors
     # print(microwatersheds_gdf)
     fig, ax = plt.subplots(figsize=(8,6))
     norm = colors.Normalize(vmin=0, vmax=15)
@@ -477,31 +483,59 @@ def filter_mws_characteristics(microwatersheds_all_gdf, grid, dem, pond_summary,
     microwatersheds_filter_gdf.plot(ax=ax, aspect=1, cmap='tab20', edgecolor='white', alpha=0.5)
     pond_summary.plot(ax=ax, aspect=1, color='blue', edgecolor='blue')
 
-    # Add labels
-    # for idx, row in microwatersheds_filter_gdf.iterrows():
-    #     plt.annotate(text=row['Microwatershed_ID'], xy=(row.geometry.centroid.x, row.geometry.centroid.y),
-    #                 xytext=(3, 3), textcoords='offset points', fontsize=8, color='black')
+    # Add labels to the microwatersheds using 'BasinGeo' as the geometry column
+    for idx, row in microwatersheds_filter_gdf.iterrows():
+        plt.annotate(text=row['Microwatershed_ID'], xy=(row['BasinGeo'].centroid.x, row['BasinGeo'].centroid.y),
+                    horizontalalignment='center', verticalalignment='center', fontsize=6, color='black',fontweight='bold', bbox=dict(facecolor='white', alpha=0.9, boxstyle='round,pad=0.1'))
+
 
     plt.title(f'Microwatersheds - Minimum Total Pond Area {min_total_pond_area} Acres. Max Number of Ponds {max_num_ponds}')
     plt.show()
 
-    # Select only the specified columns and order by Total_Pond_Area_Acres
-    columns_to_display = ['Microwatershed_ID', 'Area_Acres', 'Pond_Count', 'Total_Pond_Area_Acres', 'Average_Pond_Area_Acres', 'Pond_Area_Ratio']
-    filter_df = microwatersheds_filter_gdf[columns_to_display].sort_values(by='Total_Pond_Area_Acres', ascending=False)
+    # Rename columns 
+    microwatersheds_filter_gdf.rename(columns={'Avg_SUM_Annu_5': 'Total_Nitrogen_(Lb/Yr)'}, inplace=True)
+    microwatersheds_filter_gdf.rename(columns={'Avg_SUM_Annu_8': 'Total_Phosphorous_(Lb/Yr)'}, inplace=True)
+    microwatersheds_filter_gdf.rename(columns={'Pond_Area_Percentage': 'Pond Area /_MWS Area_Percentage'}, inplace=True)
+    microwatersheds_filter_gdf.rename(columns={'Microwatershed_ID': 'Microwshed_ID'}, inplace=True)
 
-    # Format the DataFrame columns
-    filter_df['Microwatershed_ID'] = filter_df['Microwatershed_ID'].astype(int)  # No decimal places
-    filter_df['Pond_Count'] = filter_df['Pond_Count'].astype(int)  # No decimal places
-    filter_df['Area_Acres'] = filter_df['Area_Acres'].map('{:.2f}'.format)  # Two decimal places
-    filter_df['Total_Pond_Area_Acres'] = filter_df['Total_Pond_Area_Acres'].map('{:.2f}'.format)  # Two decimal places
-    filter_df['Average_Pond_Area_Acres'] = filter_df['Average_Pond_Area_Acres'].map('{:.2f}'.format)  # Two decimal places
-    filter_df['Pond_Area_Ratio'] = filter_df['Pond_Area_Ratio'].map('{:.4f}'.format)  # Four decimal places
+    # Select only the specified columns and order by Total_Pond_Area_Acres
+    columns_to_display = ['Microwshed_ID', 
+                        'Area_Acres', 
+                        'Pond_Count', 
+                        'Total_Pond_Area_Acres', 
+                        'Average_Pond_Area_Acres', 
+                        'Pond Area /_MWS Area_Percentage', 
+                        'Pond_Controllable_Volume_Ac-Ft', 
+                        'Total_Nitrogen_(Lb/Yr)', 
+                        'Total_Phosphorous_(Lb/Yr)', 
+                        'Percent_Impervious', 
+                        'Percent_Urban']
+    filter_df = microwatersheds_filter_gdf[columns_to_display].sort_values(by='Total_Pond_Area_Acres', ascending=False)
+    # filter_df = filter_df[filter_df['Microwatershed_ID'] == 121]
+
+    format_columns = {
+        'Microwshed_ID': '{:.0f}',
+        'Pond_Count': '{:.0f}',
+        'Area_Acres': '{:.2f}',
+        'Total_Pond_Area_Acres': '{:.2f}',
+        'Average_Pond_Area_Acres': '{:.2f}',
+        'Pond Area /_MWS Area_Percentage': '{:.2f}',
+        'Pond_Controllable_Volume_Ac-Ft': '{:.2f}',
+        'Total_Nitrogen_(Lb/Yr)': '{:.2f}',
+        'Total_Phosphorous_(Lb/Yr)': '{:.2f}',
+        'Percent_Impervious': '{:.2f}',
+        'Percent_Urban': '{:.2f}'
+    }
+
+    for col, fmt in format_columns.items():
+        filter_df[col] = filter_df[col].map(fmt.format)
 
     # Print the DataFrame
     print(filter_df.head(20))
 
     # Save plot to pdf
     pdf_pages.savefig(fig)
+
 
     # Add DataFrame to the PDF
     fig, ax = plt.subplots(figsize=(8, 6))
@@ -510,18 +544,73 @@ def filter_mws_characteristics(microwatersheds_all_gdf, grid, dem, pond_summary,
     table_data = filter_df.head(20).values  # Assuming filter_df is your DataFrame
     columns = [col.replace('_', '\n') for col in filter_df.columns.tolist()]
     table = ax.table(cellText=table_data, colLabels=columns, cellLoc='center', loc='center')
+
+    # Function for coloring columns
+    def create_color_map(df, column, cmap, alpha=0.5):
+        norm = plt.Normalize(df[column].astype(float).min(), df[column].astype(float).max())
+        col_colors = cmap(norm(df[column].astype(float)))
+        col_colors[:, -1] = alpha  # Set alpha transparency
+        return col_colors
+
+    columns_to_color = {
+        'Pond_Count': plt.cm.plasma,
+        'Area_Acres': plt.cm.plasma,
+        'Total_Pond_Area_Acres': plt.cm.plasma,
+        'Average_Pond_Area_Acres': plt.cm.plasma,
+        'Pond Area /_MWS Area_Percentage': plt.cm.plasma,
+        'Pond_Controllable_Volume_Ac-Ft': plt.cm.plasma,
+        'Total_Nitrogen_(Lb/Yr)': plt.cm.plasma,
+        'Total_Phosphorous_(Lb/Yr)': plt.cm.plasma,
+        'Percent_Impervious': plt.cm.plasma,
+        'Percent_Urban': plt.cm.plasma,
+    }
+
+    col_colors = {col: create_color_map(filter_df, col, cmap) for col, cmap in columns_to_color.items()}
+
+
     table.auto_set_font_size(False)
     table.set_fontsize(8)
     table.scale(1.2, 1.2)  # Adjust the size of the table
+
+    # Apply col_colors to the columns
+    for col, color_map in col_colors.items():
+        col_index = columns.index(col.replace('_', '\n'))
+        for i in range(len(table_data)):
+            cell = table[(i+1, col_index)]  # (row, column)
+            cell.set_facecolor(color_map[i])
+            cell.set_text_props(color='black')
 
     # Adjust header cell height if needed
     for (i, j), cell in table.get_celld().items():
         if i == 0:  # Header row
             cell.set_height(0.12)  # Adjust height for better visibility
 
+    # Also export to a csv
+    # Get the current datetime and format it
+    from datetime import datetime
+    now = datetime.now()
+    datetime_str = now.strftime("%Y-%m-%d_%H%M")  # Format: 2024-11-22_0230
+    filter_df.to_csv(rf'outputs\\tables\\SummaryTable_{file}_{datetime_str}.csv', index=False)
+
     pdf_pages.savefig(fig)  # Save the DataFrame table to the PDF
 
-    return pdf_pages, filter_df
+    return pdf_pages, filter_df, microwatersheds_filter_gdf
+
+def export_microwatersheds(polygon):
+    # Export Microwatershed output to a shapefile
+
+    # Get the current datetime and format it
+    import os
+    from datetime import datetime
+    now = datetime.now()
+    datetime_str = now.strftime("%Y-%m-%d_%H%M")  # Format: 2024-11-22_0230
+
+    # Define the output file path
+    os.makedirs(rf'outputs\\shp\\{datetime_str}', exist_ok=True)
+    output_file_path = f"outputs\shp\{datetime_str}\Microwatersheds_{file}_{datetime_str}.shp"
+
+    # Export the GeoDataFrame to a shapefile
+    polygon.to_file(output_file_path, driver='ESRI Shapefile')
 
 def close_pdf(pdf_pages):
     # Close the PDF file
@@ -542,7 +631,7 @@ def interactive_map(pond_summary, microwatersheds_all_gdf, branches_):
     threes = microwatersheds_all_gdf[microwatersheds_all_gdf['Order']==3] # skip fours
 
     # Map 'em!
-    cols = ['Microwatershed_ID', 'Area_Acres', 'Order', 'Pond_Count', 'Total_Pond_Area_Acres', 'Average_Pond_Area_Acres', 'Pond_Area_Ratio', 'BasinGeo']
+    cols = ['Microwatershed_ID', 'Area_Acres', 'Order', 'Pond_Count', 'Total_Pond_Area_Acres', 'Average_Pond_Area_Acres', 'Pond_Area_Percentage', 'BasinGeo']
     cols_branches = ['Index','Length','Relief','Order','Slope','geometry','LocalPP_X','LocalPP_Y','Final_Chain_Val']
     # pond_cols = ['Pond_ID', 'area']
 
@@ -556,6 +645,35 @@ def interactive_map(pond_summary, microwatersheds_all_gdf, branches_):
     # m
 
     return m
+
+# Function to create the interactive map and table
+def dash_map(filter_df, microwatersheds_filter_gdf):
+    import folium
+    
+    # Create a base map
+    m = folium.Map(location=[28.2, -80.7], zoom_start=4)
+    
+    # Add polygons to the map
+    for _, row in microwatersheds_filter_gdf.iterrows():
+        folium.GeoJson(row['BasinGeo']).add_to(m)
+    
+    # Display the map in Streamlit
+    st.components.v1.html(m._repr_html_(), height=600)
+
+    # Display the table in Streamlit
+    selected_row = st.selectbox("Select a Microwatershed ID", filter_df['Microwatershed_ID'])
+    
+    # Highlight selected polygon
+    if selected_row:
+        selected_id = selected_row
+        selected_polygon = microwatersheds_filter_gdf[microwatersheds_filter_gdf['Microwatershed_ID'] == selected_id]
+        folium.GeoJson(
+            selected_polygon['BasinGeo'].values[0],
+            style_function=lambda x: {'fillColor': 'yellow'}
+        ).add_to(m)
+        
+        # Update the map with the highlighted polygon
+        st.components.v1.html(m._repr_html_(), height=600)
 
 
 
@@ -595,7 +713,7 @@ def main(file, epsg, units, aggregation, flow_file_path, burn_width, burn_value,
 
     interactive_map(pond_summary, microwatersheds_all_gdf, branches_)
 
-    return pdf_path, m
+    return pdf_path
 
 
 # Streamlit app layout
@@ -606,22 +724,22 @@ dems = ["Terrain_Grant_Valkaria_ClipNoData_NAD83",
         "UpperCanalMosa_1m_NAD83"]
 
 # User inputs
-file = st.selectbox("Enter the DEM file name (without extension):", ["Terrain_Grant_Valkaria_ClipNoData_NAD83", "Terrain_Grant_Valkaria_ClipNoData_FLA", "PinedaScalgo_1m_NAD83", "Pineda_Scalgo_AggMedian16_NAD83", "Pineda_Scalgo_8m_NAD83", "Melbourne_NAD83", "Tomako_FLA", "UpperCanalMosa_1m_NAD83"])
+file = st.selectbox("Enter the DEM file name (without extension):", ["Pineda_Scalgo_8m_NAD83", "Terrain_Grant_Valkaria_ClipNoData_NAD83", "Terrain_Grant_Valkaria_ClipNoData_FLA", "PinedaScalgo_1m_NAD83", "Pineda_Scalgo_AggMedian16_NAD83", "Melbourne_NAD83", "Tomako_FLA", "UpperCanalMosa_1m_NAD83"])
 epsg = st.selectbox("Enter the EPSG code (2881 for StatePlane Florida East. 26917 for NAD83 Zone 17N):", ["26917", "2881"])
 units = st.selectbox("Enter the units of the DEM", ["Meters", "US Foot"])
-aggregation = st.number_input("DEM Aggregation Factor:", min_value=0, value=16)
+aggregation = st.number_input("DEM Aggregation Factor:", min_value=0, value=1)
 flow_file_path = st.selectbox("Enter the clipped flowlines path:", ["IRL-Flowlines-Export_NAD83.shp", "IRL-Pineda-Flowlines-Export_NAD83.shp", "IRL-UpperCanalFlowlines-Export_NAD83.shp"])
-burn_width = st.number_input("Burn Width:", min_value=1, value=3)
-burn_value = st.number_input("Burn Value:", value=-2)
-river_network_min_flow_acc = st.number_input("Minimum Flow Accumulation - Channels:", min_value=0, value=1000)
-min_total_pond_area = st.number_input("Minimum Total Pond Area per Microwatershed:", min_value=0, value=20)
+burn_width = st.number_input("Burn Width:", min_value=1, value=1)
+burn_value = st.number_input("Burn Value:", value=0)
+river_network_min_flow_acc = st.number_input("Minimum Flow Accumulation - Channels:", min_value=0, value=3000)
+min_total_pond_area = st.number_input("Minimum Total Pond Area per Microwatershed:", min_value=0, value=15)
 max_num_ponds = st.number_input("Max Number of Ponds per Microwatershed:", min_value=0, value=50)
 
 
 # Button to run the main function
 if st.button("Run"):
     with st.spinner("Running..."):
-        pdf_path, m = main(file, epsg, units, aggregation, flow_file_path, burn_width, burn_value, river_network_min_flow_acc, min_total_pond_area, max_num_ponds)
+        pdf_path = main(file, epsg, units, aggregation, flow_file_path, burn_width, burn_value, river_network_min_flow_acc, min_total_pond_area, max_num_ponds)
     st.success("Complete. A report with the key figures is saved to the outputs folder.")
     
     # Open the PDF file
