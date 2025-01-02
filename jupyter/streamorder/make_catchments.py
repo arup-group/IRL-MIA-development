@@ -169,7 +169,7 @@ def generate_catchments(path,acc_thresh=100,so_filter=3,
     
     print("reading in shorelines")
     # Load the shorelines dataset
-    shoreline = gpd.read_file(r'data-inputs\\FLA-Shoreline\\FLA-Shoreline_4269.shp')
+    shoreline = gpd.read_file(r'data-inputs\\FLA-Shoreline\\FLA-Shoreline_4269_Clip.shp')
     
     # make main GeoDataFrame -- the indices here will match those of all profile
     # and connection lists that follow
