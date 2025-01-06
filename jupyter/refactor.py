@@ -656,8 +656,8 @@ def filter_mws_characteristics(microwatersheds_all_gdf, grid, dem, ponds_interse
     # Rename columns 
     microwatersheds_filter_gdf.rename(columns={'Avg_SUM_Annu_5': 'Total_Nitrogen_(Lb/Yr)'}, inplace=True)
     microwatersheds_filter_gdf.rename(columns={'Avg_SUM_Annu_8': 'Total_Phosphorous_(Lb/Yr)'}, inplace=True)
-    microwatersheds_filter_gdf.rename(columns={'Pond_Area_Percentage': 'Pond Area /_MWS Area_Percentage'}, inplace=True)
-    microwatersheds_filter_gdf.rename(columns={'Pondshed_to_MWS_Percentage': 'Pondshed Area /_MWS Area_Percentage'}, inplace=True)
+    microwatersheds_filter_gdf.rename(columns={'Pond_Area_Percentage': 'Pond /_MWS Area_Percentage'}, inplace=True)
+    microwatersheds_filter_gdf.rename(columns={'Pondshed_to_MWS_Percentage': 'Pondshed /_MWS Area_Percentage'}, inplace=True)
     microwatersheds_filter_gdf.rename(columns={'Microwatershed_ID': 'Microwshed_ID'}, inplace=True)
 
     # Select only the specified columns and order by Total_Pond_Area_Acres
@@ -667,9 +667,9 @@ def filter_mws_characteristics(microwatersheds_all_gdf, grid, dem, ponds_interse
                         #   'Average_Pond_Area_Acres', 
                         'Total_Pond_Area_Acres', 
                         'Total_Pondshed_Area_Acres',
-                        'Pondshed_to_Pond_Ratio',
-                        'Pond Area /_MWS Area_Percentage',
-                        'Pondshed Area /_MWS Area_Percentage',
+                        # 'Pondshed_to_Pond_Ratio',
+                        'Pond /_MWS Area_Percentage',
+                        'Pondshed /_MWS Area_Percentage',
                         'Pond_Controllable_Volume_Ac-Ft', 
                         'Total_Nitrogen_(Lb/Yr)', 
                         'Total_Phosphorous_(Lb/Yr)', 
@@ -685,9 +685,9 @@ def filter_mws_characteristics(microwatersheds_all_gdf, grid, dem, ponds_interse
         # 'Average_Pond_Area_Acres': '{:.2f}',
         'Total_Pond_Area_Acres': '{:.2f}',
         'Total_Pondshed_Area_Acres': '{:.2f}',
-        'Pondshed_to_Pond_Ratio': '{:.2f}',
-        'Pond Area /_MWS Area_Percentage': '{:.2f}',
-        'Pondshed Area /_MWS Area_Percentage': '{:.2f}',
+        # 'Pondshed_to_Pond_Ratio': '{:.2f}',
+        'Pond /_MWS Area_Percentage': '{:.2f}',
+        'Pondshed /_MWS Area_Percentage': '{:.2f}',
         'Pond_Controllable_Volume_Ac-Ft': '{:.2f}',
         'Total_Nitrogen_(Lb/Yr)': '{:.2f}',
         'Total_Phosphorous_(Lb/Yr)': '{:.2f}',
@@ -725,10 +725,10 @@ def filter_mws_characteristics(microwatersheds_all_gdf, grid, dem, ponds_interse
         'Area_Acres': plt.cm.plasma,
         'Total_Pond_Area_Acres': plt.cm.plasma,
         'Total_Pondshed_Area_Acres': plt.cm.plasma,
-        'Pondshed_to_Pond_Ratio': plt.cm.plasma,
+        # 'Pondshed_to_Pond_Ratio': plt.cm.plasma,
         # 'Average_Pond_Area_Acres': plt.cm.plasma,
-        'Pond Area /_MWS Area_Percentage': plt.cm.plasma,
-        'Pondshed Area /_MWS Area_Percentage': plt.cm.plasma,
+        'Pond /_MWS Area_Percentage': plt.cm.plasma,
+        'Pondshed /_MWS Area_Percentage': plt.cm.plasma,
         'Pond_Controllable_Volume_Ac-Ft': plt.cm.plasma,
         'Total_Nitrogen_(Lb/Yr)': plt.cm.plasma,
         'Total_Phosphorous_(Lb/Yr)': plt.cm.plasma,
@@ -740,7 +740,7 @@ def filter_mws_characteristics(microwatersheds_all_gdf, grid, dem, ponds_interse
 
 
     table.auto_set_font_size(False)
-    table.set_fontsize(8)
+    table.set_fontsize(7)
     table.scale(1.2, 1.2)  # Adjust the size of the table
 
     # Apply col_colors to the columns
