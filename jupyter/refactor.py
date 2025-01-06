@@ -434,6 +434,81 @@ def plot_pond_overlay(grid, dem, microwatersheds_gdf, ponds_intersect, pdf_pages
 
     return pdf_pages
 
+def pondshed_buffer(ponds_gdf, mws_all_gdf, tolerance=1e-3):
+    # Calculates pondshed buffer area and adds 'total pondshed area' to each MWS
+
+    # Calculate volume
+    ponds_gdf['Pond_Controllable_Volume_Ac-Ft'] = 0.6431378064 + 2.5920596874 * ponds_gdf['Area_Acres_left']
+
+    # Calculate pondshed area
+    ponds_gdf['Pondshed_Area_Ac'] = ponds_gdf['Pond_Controllable_Volume_Ac-Ft'] / (1/3) # assuming the runoff depth is 4 inches, or 1/3 ft
+
+    # Reproject to a coordinate system with meters as units (e.g., EPSG 3857)
+    ponds_gdf = ponds_gdf.to_crs(epsg=26917)
+
+    # Calculate the area in acres
+    ponds_gdf['Area_Acres_Temp'] = ponds_gdf.geometry.area / 4046.86
+    
+    buffered_ponds = []
+    
+    print('Calculating pondshed buffers...')
+    for idx, row in ponds_gdf.iterrows():
+        pond = row.geometry
+        pond_area = row['Area_Acres_left']
+        controlled_area = row['Pondshed_Area_Ac']
+        buffer_distance = 0.0
+        step = 1  # Initial step size for buffer distance
+        
+        while True:
+            buffered_pond = pond.buffer(buffer_distance)
+            buffered_area = buffered_pond.area / 4046.86
+            
+            if abs(buffered_area - controlled_area) < tolerance:
+                break
+            
+            if buffered_area < controlled_area:
+                buffer_distance += step
+            else:
+                buffer_distance -= step
+                step /= 2  # Reduce step size for finer adjustment
+        
+        buffered_ponds.append(buffered_pond)
+    
+    buffered_ponds_gdf = ponds_gdf.copy()
+    buffered_ponds_gdf['geometry'] = buffered_ponds
+
+    print('Calculating pondshed areas...')
+
+    # Dissolve the buffered areas, then sum the area per MWS
+
+    # Step 1: Reproject both datasets to the same CRS (EPSG:26917)
+    mws_all_gdf = mws_all_gdf.to_crs(epsg=26917)
+    buff = buffered_ponds_gdf
+
+    # Step 2: Dissolve the buffer layer to remove overlaps
+    buff_dissolved = buff.dissolve(by='Microwatershed_ID', as_index=False)
+
+    # Step 3: OPTIONAL - Clip the dissolved buffer layer to the microwatershed boundaries
+    # buff_clipped = gpd.clip(buff_dissolved, mws_all_gdf)
+    buff_clipped = buff_dissolved
+
+    buff_clipped['Clipped_Pondshed_Area_Acres'] = buff_clipped.geometry.area / 4046.86
+
+    # Step 4: Calculate the total area by summing by MWS
+    buff_clipped['PondshedAreaSum'] = buff_clipped.groupby('Microwatershed_ID')['Clipped_Pondshed_Area_Acres'].transform('sum')
+    pondsheds = buff_clipped.to_crs(epsg=4269)
+    mws_all_gdf = mws_all_gdf.merge(pondsheds[['Microwatershed_ID', 'PondshedAreaSum']], on='Microwatershed_ID', how='left')
+
+    # Add columns to MWS layer
+    mws_all_gdf['Total_Pondshed_Area_Acres'] = mws_all_gdf['PondshedAreaSum']
+    mws_all_gdf['Pondshed_to_Pond_Ratio'] = (mws_all_gdf['Total_Pondshed_Area_Acres'] / mws_all_gdf['Total_Pond_Area_Acres']).round(2)
+    mws_all_gdf['Pondshed_to_MWS_Percentage'] = (mws_all_gdf['Total_Pondshed_Area_Acres'] / mws_all_gdf['Area_Acres'] * 100 ).round(2)
+    mws_all_gdf = mws_all_gdf.to_crs(epsg=4269)
+
+    print('Pondshed areas complete')
+
+    return mws_all_gdf, pondsheds
+
 def summarize_nutrients(overlay_gdf, microwatersheds_gdf, column_name):
     # calculate areas (just ensure the two datasets are in the same CRS)
     microwatersheds_gdf['RatArea'] = microwatersheds_gdf.area
@@ -537,7 +612,7 @@ def urban_area(overlay_gdf, microwatersheds_gdf):
 
     return microwatersheds_gdf
 
-def filter_mws_characteristics(microwatersheds_all_gdf, grid, dem, ponds_intersect, pdf_pages, min_total_pond_area, max_num_ponds):
+def filter_mws_characteristics(microwatersheds_all_gdf, grid, dem, ponds_intersect, pdf_pages, min_total_pond_area, max_num_ponds, pondsheds):
     # Filter MWS characteristics
 
     # Total Pond Area - likely the most important
@@ -566,6 +641,7 @@ def filter_mws_characteristics(microwatersheds_all_gdf, grid, dem, ponds_interse
     #plot DEM with high transparency
     plt.imshow(dem, extent=grid.extent, cmap='terrain', norm=norm, zorder=1, alpha=0.25)
     microwatersheds_filter_gdf.plot(ax=ax, aspect=1, cmap='tab20', edgecolor='white', alpha=0.5)
+    pondsheds.plot(ax=ax, aspect=1, alpha=0.25, color='blue')
     ponds_intersect.plot(ax=ax, aspect=1, color='blue', edgecolor='blue')
 
     # Add labels to the microwatersheds using 'BasinGeo' as the geometry column
@@ -581,15 +657,19 @@ def filter_mws_characteristics(microwatersheds_all_gdf, grid, dem, ponds_interse
     microwatersheds_filter_gdf.rename(columns={'Avg_SUM_Annu_5': 'Total_Nitrogen_(Lb/Yr)'}, inplace=True)
     microwatersheds_filter_gdf.rename(columns={'Avg_SUM_Annu_8': 'Total_Phosphorous_(Lb/Yr)'}, inplace=True)
     microwatersheds_filter_gdf.rename(columns={'Pond_Area_Percentage': 'Pond Area /_MWS Area_Percentage'}, inplace=True)
+    microwatersheds_filter_gdf.rename(columns={'Pondshed_to_MWS_Percentage': 'Pondshed Area /_MWS Area_Percentage'}, inplace=True)
     microwatersheds_filter_gdf.rename(columns={'Microwatershed_ID': 'Microwshed_ID'}, inplace=True)
 
     # Select only the specified columns and order by Total_Pond_Area_Acres
     columns_to_display = ['Microwshed_ID', 
-                        'Area_Acres', 
                         'Pond_Count', 
+                        'Area_Acres', 
+                        #   'Average_Pond_Area_Acres', 
                         'Total_Pond_Area_Acres', 
-                        'Average_Pond_Area_Acres', 
-                        'Pond Area /_MWS Area_Percentage', 
+                        'Total_Pondshed_Area_Acres',
+                        'Pondshed_to_Pond_Ratio',
+                        'Pond Area /_MWS Area_Percentage',
+                        'Pondshed Area /_MWS Area_Percentage',
                         'Pond_Controllable_Volume_Ac-Ft', 
                         'Total_Nitrogen_(Lb/Yr)', 
                         'Total_Phosphorous_(Lb/Yr)', 
@@ -602,9 +682,12 @@ def filter_mws_characteristics(microwatersheds_all_gdf, grid, dem, ponds_interse
         'Microwshed_ID': '{:.0f}',
         'Pond_Count': '{:.0f}',
         'Area_Acres': '{:.2f}',
+        # 'Average_Pond_Area_Acres': '{:.2f}',
         'Total_Pond_Area_Acres': '{:.2f}',
-        'Average_Pond_Area_Acres': '{:.2f}',
+        'Total_Pondshed_Area_Acres': '{:.2f}',
+        'Pondshed_to_Pond_Ratio': '{:.2f}',
         'Pond Area /_MWS Area_Percentage': '{:.2f}',
+        'Pondshed Area /_MWS Area_Percentage': '{:.2f}',
         'Pond_Controllable_Volume_Ac-Ft': '{:.2f}',
         'Total_Nitrogen_(Lb/Yr)': '{:.2f}',
         'Total_Phosphorous_(Lb/Yr)': '{:.2f}',
@@ -641,8 +724,11 @@ def filter_mws_characteristics(microwatersheds_all_gdf, grid, dem, ponds_interse
         'Pond_Count': plt.cm.plasma,
         'Area_Acres': plt.cm.plasma,
         'Total_Pond_Area_Acres': plt.cm.plasma,
-        'Average_Pond_Area_Acres': plt.cm.plasma,
+        'Total_Pondshed_Area_Acres': plt.cm.plasma,
+        'Pondshed_to_Pond_Ratio': plt.cm.plasma,
+        # 'Average_Pond_Area_Acres': plt.cm.plasma,
         'Pond Area /_MWS Area_Percentage': plt.cm.plasma,
+        'Pondshed Area /_MWS Area_Percentage': plt.cm.plasma,
         'Pond_Controllable_Volume_Ac-Ft': plt.cm.plasma,
         'Total_Nitrogen_(Lb/Yr)': plt.cm.plasma,
         'Total_Phosphorous_(Lb/Yr)': plt.cm.plasma,
@@ -792,6 +878,8 @@ def main(file, epsg, units, aggregation, flow_file_path, burn_width, burn_value,
 
     pdf_pages = plot_pond_overlay(grid, dem, microwatersheds_gdf, ponds_intersect, pdf_pages)
 
+    microwatersheds_all_gdf, pondsheds = pondshed_buffer(ponds_intersect, microwatersheds_all_gdf, tolerance=1e-3)
+
     # Load nutrients layer
     nutrients = gpd.read_file(r'data-inputs\\Nutrients\\Nutrients_Brevard_4326.shp')
     microwatersheds_all_gdf = summarize_nutrients(nutrients, microwatersheds_all_gdf, 'SUM_Annu_5')
@@ -804,7 +892,7 @@ def main(file, epsg, units, aggregation, flow_file_path, burn_width, burn_value,
 
     export_microwatersheds(microwatersheds_all_gdf)
 
-    pdf_pages, filter_df, microwatersheds_filter_gdf = filter_mws_characteristics(microwatersheds_all_gdf, grid, dem, ponds_intersect, pdf_pages, min_total_pond_area, max_num_ponds)
+    pdf_pages, filter_df, microwatersheds_filter_gdf = filter_mws_characteristics(microwatersheds_all_gdf, grid, dem, ponds_intersect, pdf_pages, min_total_pond_area, max_num_ponds, pondsheds)
 
     close_pdf(pdf_pages)
 
