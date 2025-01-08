@@ -122,7 +122,7 @@ def make_basin(row,grid,dem,fdir,
 ######################################################################
 
 def generate_catchments(path,acc_thresh=100,so_filter=3,
-                        routing='d8',algorithm='iterative'):
+                        routing='d8',algorithm='iterative', shoreline_clip=False):
     '''Full workflow integrating the above functions.
        Process is as follows: 
        
@@ -167,16 +167,26 @@ def generate_catchments(path,acc_thresh=100,so_filter=3,
     print('Generating stream network...')
     branches = grid.extract_river_network(fdir=fdir,mask=mask) # returns geojson
     
-    print("reading in shorelines")
-    # Load the shorelines dataset
-    shoreline = gpd.read_file(r'data-inputs\\FLA-Shoreline\\FLA-Shoreline_4269_Clip.shp')
-    
-    # make main GeoDataFrame -- the indices here will match those of all profile
-    # and connection lists that follow
-    branch_gdf_i = gpd.GeoDataFrame.from_features(branches,crs='epsg:4326')
+    if shoreline_clip == True:
+        print("reading in shorelines")
+        # Load the shorelines dataset
+        shoreline = gpd.read_file(r'data-inputs\\Shoreline\\FLA-Shoreline_4269.shp')
+        print("shorelines read in successfully")
+        # make main GeoDataFrame -- the indices here will match those of all profile
+        # and connection lists that follow
+        branch_gdf_i = gpd.GeoDataFrame.from_features(branches,crs='epsg:4269')
 
-    branch_gdf = gpd.clip(branch_gdf_i, shoreline)
-    print("post clip")
+        area_of_interest = branch_gdf_i.total_bounds
+        shoreline_clip = shoreline.cx[area_of_interest[0]:area_of_interest[2], area_of_interest[1]:area_of_interest[3]]
+        shoreline_clip = shoreline_clip[shoreline_clip['ATTRIBUTE'] != 'Land']
+        shoreline_clip = shoreline_clip[shoreline_clip['Shape_Area'] > 0.000002]
+        print("shorelines filtered by attribute column")
+        
+
+        branch_gdf = gpd.clip(branch_gdf_i, shoreline_clip)
+        print("post clip")
+    else:
+        branch_gdf = gpd.GeoDataFrame.from_features(branches,crs='epsg:4326')
     
     # generate profiles for each individual segment
     profiles, connections = grid.extract_profiles(fdir=fdir,mask=mask,include_endpoint=False)

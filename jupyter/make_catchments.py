@@ -170,13 +170,25 @@ def generate_catchments(path,acc_thresh=100,so_filter=3,
     if shoreline_clip == True:
         print("reading in shorelines")
         # Load the shorelines dataset
-        shoreline = gpd.read_file(r'data-inputs\\FLA-Shoreline\\FLA-Shoreline_4269_Clip.shp')
-    
+        shoreline = gpd.read_file(r'data-inputs\\Shoreline\\FLA-Shoreline_4269.shp')
+        print("shorelines read in successfully")
         # make main GeoDataFrame -- the indices here will match those of all profile
         # and connection lists that follow
-        branch_gdf_i = gpd.GeoDataFrame.from_features(branches,crs='epsg:4326')
+        branch_gdf_i = gpd.GeoDataFrame.from_features(branches,crs='epsg:4269')
 
-        branch_gdf = gpd.clip(branch_gdf_i, shoreline)
+        from shapely.geometry import Polygon
+        # Clip the shoreline dataset to the AOI
+        area_of_interest = Polygon([(grid.bbox[0], grid.bbox[1]), (grid.bbox[0], grid.bbox[3]), (grid.bbox[2], grid.bbox[3]), (grid.bbox[2], grid.bbox[1]), (grid.bbox[0], grid.bbox[1])])
+        area_of_interest = gpd.GeoDataFrame(index=[0], crs="EPSG:4269", geometry=[area_of_interest])
+
+        shoreline_clip = gpd.clip(shoreline, area_of_interest)
+        # Filter shoreline dataset for only shorelines and meaningful area sizes
+        shoreline_clip = shoreline_clip[shoreline_clip['ATTRIBUTE'] != 'Land']
+        shoreline_clip = shoreline_clip[shoreline_clip['Shape_Area'] > 0.000002] # Equivalent to approx > 5 acres
+        print("shorelines filtered by attribute column")
+        
+
+        branch_gdf = gpd.clip(branch_gdf_i, shoreline_clip)
         print("post clip")
     else:
         branch_gdf = gpd.GeoDataFrame.from_features(branches,crs='epsg:4326')
