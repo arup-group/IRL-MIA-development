@@ -221,6 +221,7 @@ def burn_features(c_path, crs_dem, dem_agg_path, burn_width, burn_value, pond_bu
             bbox = box(bounds.left, bounds.bottom, bounds.right, bounds.top)
             bbox_gdf = gpd.GeoDataFrame({'geometry': bbox}, index=[0], crs=src.crs)
 
+        print("clipping flowlines...")
         # Clip flowlines to DEM extent
         flowlines_clip = gpd.clip(flowlines, bbox_gdf)
 
@@ -234,6 +235,7 @@ def burn_features(c_path, crs_dem, dem_agg_path, burn_width, burn_value, pond_bu
         # Load the shorelines dataset
         shoreline = gpd.read_file(r'data-inputs\\Shoreline\\FLA-Shoreline_4269.shp')
 
+        print("clipping shorelines...")
         shoreline_clip = gpd.clip(shoreline, bbox_gdf)
 
         shoreline_clip = shoreline_clip[shoreline_clip['ATTRIBUTE'] != 'Land']
@@ -254,7 +256,7 @@ def burn_features(c_path, crs_dem, dem_agg_path, burn_width, burn_value, pond_bu
 
         # Rasterize the flowlines
         flowline_raster = rasterize(
-            [(geom, 1) for geom in flowlines.geometry],
+            [(geom, 1) for geom in flowlines_clip.geometry],
             out_shape=out_shape,
             transform=transform,
             fill=0,
@@ -894,7 +896,7 @@ def export_microwatersheds(polygon):
     output_file_path = f"outputs\shp\{datetime_str}\Microwatersheds_{file}_{datetime_str}.shp"
 
     # Export the GeoDataFrame to a shapefile
-    polygon.to_file(output_file_path, driver='ESRI Shapefile')
+    polygon.to_file(output_file_path, driver='GPKG')
 
 def close_pdf(pdf_pages):
     # Close the PDF file
@@ -1003,9 +1005,9 @@ def main(file, epsg, units, aggregation, flow_file_path, burn_width, burn_value,
     land_cover = gpd.read_file(r'data-inputs\\LandCover\\Land_Cover_FLA_4326.shp')
     microwatersheds_all_gdf = urban_area(land_cover, microwatersheds_all_gdf)
 
-    export_microwatersheds(microwatersheds_all_gdf)
-
     pdf_pages, filter_df, microwatersheds_filter_gdf = filter_mws_characteristics(microwatersheds_all_gdf, grid, dem, ponds_intersect, pdf_pages, min_total_pond_area, max_num_ponds, pondsheds)
+
+    export_microwatersheds(microwatersheds_filter_gdf)
 
     close_pdf(pdf_pages)
 
@@ -1039,8 +1041,8 @@ units = st.selectbox("Enter the units of the DEM", ["Meters", "US Foot"])
 aggregation = st.number_input("DEM Aggregation Factor:", min_value=0, value=1)
 flow_file_path = st.selectbox("Enter the clipped flowlines path:", flowline_datasets)
 burn_width = st.number_input("Burn Width:", min_value=1, value=1)
-burn_value = st.number_input("Burn Value:", value=0)
-pond_burn_value = st.number_input("Pond Burn Value:", value=0)
+burn_value = st.number_input("Burn Value:", value=0.0)
+pond_burn_value = st.number_input("Pond Burn Value:", value=0.0)
 river_network_min_flow_acc = st.number_input("Minimum Flow Accumulation - Channels:", min_value=0, value=3000)
 min_total_pond_area = st.number_input("Minimum Total Pond Area per Microwatershed:", min_value=0, value=15)
 max_num_ponds = st.number_input("Max Number of Ponds per Microwatershed:", min_value=0, value=50)
