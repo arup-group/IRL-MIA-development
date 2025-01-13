@@ -13,6 +13,7 @@ from shapely.geometry import Point
 from shapely.errors import ShapelyDeprecationWarning
 import warnings
 import argparse
+from tqdm import tqdm
 
 # filter warnings for now - code will need updating for Shapely 2.0+
 warnings.filterwarnings("ignore", category=ShapelyDeprecationWarning)
@@ -103,12 +104,12 @@ def make_basin(row,grid,dem,fdir,
     '''Calculate basin geometry via pour point 
        derived from above functions.'''
     
-    index = row.name
-    row_order = row['Order']    
+    # index = row.name
+    # row_order = row['Order']    
     x, y = row['LocalPP_X'], row['LocalPP_Y']
     c = grid.catchment(x=x,y=y,fdir=fdir,routing=routing,algorithm=algorithm)
     grid.clip_to(c)
-    clipped_catch = grid.view(c)
+    # clipped_catch = grid.view(c)
     catchment_polygon = ops.unary_union([geometry.shape(shape) 
                                      for shape, value in grid.polygonize()])
     grid.viewfinder = dem.viewfinder
@@ -121,7 +122,7 @@ def make_basin(row,grid,dem,fdir,
 #                      Main Function
 ######################################################################
 
-def generate_catchments(path,acc_thresh=100,so_filter=3,
+def generate_catchments(grid, dem,acc_thresh=100,so_filter=3,
                         routing='d8',algorithm='iterative', shoreline_clip=False):
     '''Full workflow integrating the above functions.
        Process is as follows: 
@@ -133,9 +134,9 @@ def generate_catchments(path,acc_thresh=100,so_filter=3,
        5. Return gdf of all catchment data and stream network.
        
        '''
-    print('Reading DEM...')
-    grid = Grid.from_raster(path)
-    dem = grid.read_raster(path)
+    print('Starting pysheds...')
+    # grid = Grid.from_raster(path)
+    # dem = grid.read_raster(path)
     
     local_start = time.time()
     
@@ -149,12 +150,13 @@ def generate_catchments(path,acc_thresh=100,so_filter=3,
     # Specify directional mapping
     dirmap = (64, 128, 1, 2, 4, 8, 16, 32)
     
+    print("Pysheds flow direction...")
     # Compute flow directions
     # -------------------------------------
     fdir = grid.flowdir(inflated_dem, dirmap=dirmap)
     
     # make flow accumulation raster
-    print('Making flow accumulaton map...')
+    print('Pysheds flow accumulaton map...')
     acc = grid.accumulation(fdir, dirmap=dirmap)
     # set mask
     acc_mask = (acc_thresh < acc )
@@ -164,17 +166,26 @@ def generate_catchments(path,acc_thresh=100,so_filter=3,
     mask = acc_mask
     
     # make river network
-    print('Generating stream network...')
+    print('Pysheds stream network...')
     branches = grid.extract_river_network(fdir=fdir,mask=mask) # returns geojson
+    print(len(branches['features']), "branches generated")
+
+    # Clip branches to IRL region****
+    print("Clipping branches to IRL region")
+    irl_region = gpd.read_file(r'data-inputs\\IRL-boundary\\IRL-AOI_4326.shp')
+    branches = gpd.GeoDataFrame.from_features(branches,crs='epsg:4326')
+    # print(type(branches), branches.crs)
+    branches = gpd.clip(branches, irl_region)
+    print("Post IRL clip")
 
     if shoreline_clip == True:
-        print("reading in shorelines")
+        print("Pysheds branches - reading in shorelines")
         # Load the shorelines dataset
         shoreline = gpd.read_file(r'data-inputs\\Shoreline\\FLA-Shoreline_4269.shp')
         print("shorelines read in successfully")
         # make main GeoDataFrame -- the indices here will match those of all profile
         # and connection lists that follow
-        branch_gdf_i = gpd.GeoDataFrame.from_features(branches,crs='epsg:4269')
+        branch_gdf_i = branches.to_crs('epsg:4269')
 
         from shapely.geometry import Polygon
         # Clip the shoreline dataset to the AOI
@@ -189,10 +200,13 @@ def generate_catchments(path,acc_thresh=100,so_filter=3,
         
 
         branch_gdf = gpd.clip(branch_gdf_i, shoreline_clip)
-        print("post clip")
+        print("Post shoreline clip")
+        print(len(branch_gdf), "branches remain")
     else:
         branch_gdf = gpd.GeoDataFrame.from_features(branches,crs='epsg:4326')
     
+    
+
     # generate profiles for each individual segment
     profiles, connections = grid.extract_profiles(fdir=fdir,mask=mask,include_endpoint=False)
      
@@ -216,7 +230,7 @@ def generate_catchments(path,acc_thresh=100,so_filter=3,
     if so_filter:
         branch_gdf = branch_gdf[branch_gdf['Order']<=so_filter]
     
-    print('Generating',len(branch_gdf),'catchments...')
+    print('Pysheds generating',len(branch_gdf),'catchments...')
     branch_gdf = branch_gdf.apply(lambda x: make_basin(x,grid,dem,fdir,routing,algorithm),axis=1)
 
     b_copy = branch_gdf.copy()

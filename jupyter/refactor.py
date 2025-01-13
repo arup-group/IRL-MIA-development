@@ -394,11 +394,12 @@ def plot_burned_dem(dem, grid, pdf_pages, crs_dem, aggregation, burn_value, burn
 
     return pdf_pages
 
-def delineate_microwatersheds(dem_agg_burn_path, river_network_min_flow_acc):
+def delineate_microwatersheds(grid, dem, river_network_min_flow_acc):
     # NEW METHOD to delineate the catchments and stream orders 
     import make_catchments
 
-    basins_, branches_ = make_catchments.generate_catchments(dem_agg_burn_path,acc_thresh=river_network_min_flow_acc,so_filter=4, shoreline_clip=True)
+    basins_, branches_ = make_catchments.generate_catchments(grid, dem,acc_thresh=river_network_min_flow_acc,so_filter=4, shoreline_clip=True)
+    print("Pysheds complete")
 
     # Visualize output
     mws_with_stream_order = basins_.copy()
@@ -431,7 +432,7 @@ def plot_microwatersheds(dem, grid, microwatersheds_gdf, branches_, pdf_pages):
 
 def calc_mws_areas(microwatersheds_gdf):
     # Calculate areas - tabulate
-
+    print("Calculate MWS areas")
     # Add a simple numeric 'Microwatershed_ID' column starting at 1
     microwatersheds_gdf['Microwatershed_ID'] = range(1, len(microwatersheds_gdf) + 1)
     
@@ -455,13 +456,13 @@ def calc_mws_areas(microwatersheds_gdf):
     # elif units == "US Foot":
     #     microwatersheds_gdf['Area_Acres'] = microwatersheds_gdf['geometry'].area/43560
 
-    print(microwatersheds_gdf)
+    # print(microwatersheds_gdf)
 
     return microwatersheds_gdf
 
 def overlay_ponds(c_path, microwatersheds_gdf):
     # Pull in ponds dataset and intersect
-
+    print("Overlay ponds")
     import pandas as pd
     import geopandas as gpd
     from shapely import geometry, ops
@@ -508,7 +509,7 @@ def overlay_ponds(c_path, microwatersheds_gdf):
     summary_df = microwatersheds_all_gdf[columns_to_display].sort_values(by='Pond_Count', ascending=False)
 
     # Print the DataFrame
-    print(summary_df)
+    # print(summary_df)
 
     return summary_df, ponds_intersect, microwatersheds_all_gdf
 
@@ -537,6 +538,7 @@ def plot_pond_overlay(grid, dem, microwatersheds_gdf, ponds_intersect, pdf_pages
 
 def pondshed_buffer(ponds_gdf, mws_all_gdf, tolerance=1e-3):
     # Calculates pondshed buffer area and adds 'total pondshed area' to each MWS
+    print("Pondshed buffer")
 
     # Calculate volume
     ponds_gdf['Pond_Controllable_Volume_Ac-Ft'] = 0.6431378064 + 2.5920596874 * ponds_gdf['Area_Acres_left']
@@ -621,6 +623,8 @@ def pondshed_buffer(ponds_gdf, mws_all_gdf, tolerance=1e-3):
     return mws_all_gdf, pondsheds
 
 def summarize_nutrients(overlay_gdf, microwatersheds_gdf, column_name):
+    print("Summarize nutrients")
+    
     # calculate areas (just ensure the two datasets are in the same CRS)
     microwatersheds_gdf['RatArea'] = microwatersheds_gdf.area
     overlay_gdf['NutArea'] = overlay_gdf.area
@@ -651,6 +655,8 @@ def summarize_nutrients(overlay_gdf, microwatersheds_gdf, column_name):
     return microwatersheds_gdf
 
 def calculate_impervious_percentage(raster_path, microwatersheds_gdf):
+    print("Calculate impervious area")
+    
     import rasterio
     import geopandas as gpd
     from rasterio.mask import mask
@@ -686,7 +692,7 @@ def calculate_impervious_percentage(raster_path, microwatersheds_gdf):
 
 def urban_area(overlay_gdf, microwatersheds_gdf):
     # Ensure both GeoDataFrames use the same CRS
-    
+    print("Calculate urban area")
     # # MWS area
     microwatersheds_gdf['MicrowshedArea_Unitless'] = microwatersheds_gdf.area
     # print(microwatersheds_gdf.columns)
@@ -726,6 +732,7 @@ def urban_area(overlay_gdf, microwatersheds_gdf):
 
 def filter_mws_characteristics(microwatersheds_all_gdf, grid, dem, ponds_intersect, pdf_pages, min_total_pond_area, max_num_ponds, pondsheds):
     # Filter MWS characteristics
+    print("Filter MWS attributes")
 
     # Total Pond Area - likely the most important
     min_total_pond_area = min_total_pond_area
@@ -737,8 +744,8 @@ def filter_mws_characteristics(microwatersheds_all_gdf, grid, dem, ponds_interse
     max_mws_area = 500
     # microwatersheds_filter_gdf = microwatersheds_filter_gdf[microwatersheds_filter_gdf['Area_Acres'] <= max_mws_area]
 
-    # Filter out order 3 catchments (the largest order)
-    microwatersheds_filter_gdf = microwatersheds_filter_gdf[microwatersheds_filter_gdf['Order'] != 3]
+    # Filter out catchments with an order above 2
+    microwatersheds_filter_gdf = microwatersheds_filter_gdf[microwatersheds_filter_gdf['Order'] < 3]
 
     # Print MWS and intersecting ponds
     from matplotlib import colors
@@ -813,7 +820,7 @@ def filter_mws_characteristics(microwatersheds_all_gdf, grid, dem, ponds_interse
         filter_df[col] = filter_df[col].map(fmt.format)
 
     # Print the DataFrame
-    print(filter_df.head(20))
+    # print(filter_df.head(20))
 
     # Save plot to pdf
     pdf_pages.savefig(fig)
@@ -893,7 +900,7 @@ def export_microwatersheds(polygon):
 
     # Define the output file path
     os.makedirs(rf'outputs\\shp\\{datetime_str}', exist_ok=True)
-    output_file_path = f"outputs\shp\{datetime_str}\Microwatersheds_{file}_{datetime_str}.shp"
+    output_file_path = f"outputs\shp\{datetime_str}\Microwatersheds_{file}_{datetime_str}.gpkg"
 
     # Export the GeoDataFrame to a shapefile
     polygon.to_file(output_file_path, driver='GPKG')
@@ -975,15 +982,23 @@ def main(file, epsg, units, aggregation, flow_file_path, burn_width, burn_value,
 
     pdf_path, pdf_pages = initialize_pdf(c_path, file, epsg, units, aggregation, flow_file_path, burn_width, burn_value, pond_burn_value, river_network_min_flow_acc, min_total_pond_area, max_num_ponds)
     
-    dem_agg_path, grid, dem = aggregate_dem(c_path, dem_path, aggregation)
+    if aggregation != 1:
+        dem_agg_path, grid, dem = aggregate_dem(c_path, dem_path, aggregation)
+    else:
+        print("Skipped aggregation")
+        dem_agg_path = dem_path
 
     crs_dem = confirm_crs(dem_agg_path)
 
-    grid, dem, dem_agg_burn_path = burn_features(c_path, crs_dem, dem_agg_path, burn_width, burn_value, pond_burn_value, dem, file, aggregation)
+    if burn_value or pond_burn_value != 0:
+        grid, dem, dem_agg_burn_path = burn_features(c_path, crs_dem, dem_agg_path, burn_width, burn_value, pond_burn_value, dem, file, aggregation)
+    else:
+        print("Skipped burning")
+        dem_agg_burn_path = dem_agg_path
 
     pdf_pages = plot_burned_dem(dem, grid, pdf_pages, crs_dem, aggregation, burn_value, burn_width, units)
 
-    branches_, microwatersheds_gdf = delineate_microwatersheds(dem_agg_burn_path, river_network_min_flow_acc)
+    branches_, microwatersheds_gdf = delineate_microwatersheds(grid, dem, river_network_min_flow_acc)
 
     pdf_pages = plot_microwatersheds(dem, grid, microwatersheds_gdf, branches_, pdf_pages)
 
@@ -1030,7 +1045,8 @@ dems = ["Pineda_Scalgo_8m_NAD83",
         "PalmBay_1m_26917",
         "GrandHarbor_1m_26917",
         "SouthPatrickTIFF",
-        "UpperCanalMosa_1m_NAD83"]
+        "UpperCanalMosa_1m_NAD83",
+        "IRL-full-region"]
 
 flowline_datasets = ["FLA-NHD-Flowlines_NAD83.shp"]
 
