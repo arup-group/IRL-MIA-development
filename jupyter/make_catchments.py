@@ -149,10 +149,132 @@ def generate_catchments(grid, dem,acc_thresh=100,so_filter=3,
     inflated_dem = grid.resolve_flats(flooded_dem)
     # Specify directional mapping
     dirmap = (64, 128, 1, 2, 4, 8, 16, 32)
-    
+
+    print("Pysheds - started post conditioning burn")
+    # Try burning here?
+    import geopandas as gpd
+    import rasterio
+    from rasterio.features import rasterize
+    import numpy as np
+    from shapely.geometry import box
+    # Save the reprojected raster
+    crs_path = 'data-inputs\\temp\\temp_reprojected_raster.tif'
+    with rasterio.open(crs_path) as src:
+        temp = src.read(1)  # Read the first band
+
+    with rasterio.open(
+        "data-inputs\\temp\\TempPostCondition_DEM.tif",
+        "w",
+        driver="GTiff",
+        width=inflated_dem.shape[1],
+        height=inflated_dem.shape[0],
+        count=1,
+        dtype=inflated_dem.dtype,
+        crs=src.crs,
+        transform=src.transform
+    ) as dst:
+        dst.write(inflated_dem, 1)
+
+    dem_path = "data-inputs\\temp\\TempPostCondition_DEM.tif"
+    grid_cd = Grid.from_raster(dem_path)
+    dem_cd = grid_cd.read_raster(dem_path)
+    print("Pysheds - wrote raster")
+
+    # PARAMETER: Burn the flowlines into the DEM
+    burn_value = 0  # Adjust this value as needed
+
+
+    if burn_value != 0:
+        # Load the flowlines dataset
+        print('Pysheds - in burn value code')
+        flowlines = gpd.read_file(r'data-inputs\\NHD-Flowlines\\FLA-NHD-Flowlines_NAD83.shp')
+        flowlines = flowlines.to_crs(epsg=4269)
+
+        # with rasterio.open(dem_path) as src:
+        #     bounds = src.bounds
+        # # Create a bounding box geometry
+        # bbox = box(bounds.left, bounds.bottom, bounds.right, bounds.top)
+        # bbox_gdf = gpd.GeoDataFrame({'geometry': bbox}, index=[0], crs=src.crs)
+
+        # # Clip flowlines to DEM extent
+        # flowlines_clip = gpd.clip(flowlines, bbox_gdf)
+
+        # # Convert back to CRS with meters to do the buffer
+        # flowlines_clip = flowlines_clip.to_crs(epsg=26917)
+        # # PARAMETER: burn width
+        # flowlines_clip['geometry'] = flowlines_clip.geometry.buffer(1)  # Buffer by half the desired width
+        # # Convert back to CRS with lat lon
+        # flowlines_clip = flowlines_clip.to_crs(epsg=4269)
+
+        # # Load the shorelines dataset
+        # shoreline = gpd.read_file(r'data-inputs\\Shoreline\\FLA-Shoreline_4269.shp')
+
+        # from shapely.geometry import Polygon
+        # # Clip the shoreline dataset to the AOI
+        # area_of_interest = Polygon([(grid.bbox[0], grid.bbox[1]), (grid.bbox[0], grid.bbox[3]), (grid.bbox[2], grid.bbox[3]), (grid.bbox[2], grid.bbox[1]), (grid.bbox[0], grid.bbox[1])])
+        # area_of_interest = gpd.GeoDataFrame(index=[0], crs="EPSG:4269", geometry=[area_of_interest])
+
+        # shoreline_clip_temp = gpd.clip(shoreline, area_of_interest)
+
+        # shoreline_clip_temp = shoreline_clip_temp[shoreline_clip_temp['ATTRIBUTE'] != 'Land']
+        # shoreline_clip_temp = shoreline_clip_temp[shoreline_clip_temp['Shape_Area'] > 0.000002]
+
+        # print("performing shoreline clip...")
+        # # Clip the channels polyline by the shoreline dataset
+        # flowlines_clip = gpd.clip(flowlines_clip, shoreline_clip_temp)
+
+        # Ensure the flowlines are in the same CRS as the DEM
+        # file = 'Terrain_Grant_Valkaria_ClipNoData_AggMedian16_NAD83'
+        with rasterio.open(dem_path) as src:
+            # flowlines = flowlines.to_crs(src.crs)
+            transform = src.transform
+            out_shape = src.shape
+
+
+        # Rasterize the flowlines
+        flowline_raster = rasterize(
+            [(geom, 1) for geom in flowlines.geometry],
+            out_shape=out_shape,
+            transform=transform,
+            fill=0,
+            dtype='uint8',
+            all_touched=True
+        )
+
+        # Read the DEM
+        with rasterio.open(dem_path) as src:
+            dem = src.read(1)  # Read the first band
+
+
+        dem_burned = np.where(flowline_raster == 1, dem - burn_value, dem)
+
+        # Save the modified DEM
+        with rasterio.open(
+            fr'data-inputs\\temp\\Agg_Burned.tif', 
+            'w', 
+            driver='GTiff', 
+            height=dem_burned.shape[0], 
+            width=dem_burned.shape[1], 
+            count=1, 
+            dtype=dem_burned.dtype, 
+            crs=src.crs, 
+            transform=src.transform
+        ) as dst:
+            dst.write(dem_burned, 1)
+
+        dem_agg_burn_path = fr'data-inputs\\temp\\Agg_Burned.tif'
+        grid = Grid.from_raster(dem_agg_burn_path)
+        grid_clip = Grid.from_raster(dem_agg_burn_path) # to be clipped by the delineation extent to preserve the original grid
+        dem = grid.read_raster(dem_agg_burn_path)
+
+        print("Flowlines have been burned into the DEM and saved as a new file.")
+    else:
+        print("No burn value provided. Skipping the burn process.")
+
     print("Pysheds flow direction...")
     # Compute flow directions
     # -------------------------------------
+    # fdir = grid.flowdir(dem, dirmap=dirmap)
     fdir = grid.flowdir(inflated_dem, dirmap=dirmap)
     
     # make flow accumulation raster

@@ -21,7 +21,7 @@ from shapely import geometry
 # aggregation = 16
 # flow_file_path = 'IRL-Flowlines-Export_NAD83.shp'
 # burn_width=4
-# burn_value = -3  # Adjust this value as needed
+# flowlines_burn_value = -3  # Adjust this value as needed
 # river_network_min_flow_acc = 1000
 # min_total_pond_area = 20
 
@@ -90,7 +90,7 @@ def read_reproject_dem(c_path, file):
 
     return dem_path, grid, dem
 
-def initialize_pdf(c_path, file, epsg, units, aggregation, flow_file_path, burn_width, burn_value, pond_burn_value, river_network_min_flow_acc, min_total_pond_area, max_num_ponds):
+def initialize_pdf(c_path, file, epsg, units, aggregation, flow_file_path, burn_width, flowlines_burn_value, pond_burn_value, river_network_min_flow_acc, min_total_pond_area, max_num_ponds):
     # Create a PDF file to save the plots
     from matplotlib.backends.backend_pdf import PdfPages
     import matplotlib.pyplot as plt
@@ -99,7 +99,7 @@ def initialize_pdf(c_path, file, epsg, units, aggregation, flow_file_path, burn_
     now = datetime.now()
     datetime_str = now.strftime("%Y-%m-%d_%H%M")  # Format: 2024-11-22_0230
 
-    pdf_path = f'{c_path}jupyter\\outputs\\Output_{file}_{burn_value}Burn_{min_total_pond_area}MinTotPondArea_{max_num_ponds}MaxNumPonds_{datetime_str}.pdf'
+    pdf_path = f'{c_path}jupyter\\outputs\\Output_{file}_{flowlines_burn_value}Burn_{min_total_pond_area}MinTotPondArea_{max_num_ponds}MaxNumPonds_{datetime_str}.pdf'
     pdf_pages = PdfPages(pdf_path)
     
     # Add user inputs as a page
@@ -117,7 +117,7 @@ def initialize_pdf(c_path, file, epsg, units, aggregation, flow_file_path, burn_
     DEM Aggregation Factor: {aggregation}
     Clipped Flowlines Path: {flow_file_path}
     Burn Width: {burn_width}
-    Burn Value: {burn_value}
+    Burn Value: {flowlines_burn_value}
     Pond Burn Value: {pond_burn_value}
     Minimum Flow Accumulation - Channels: {river_network_min_flow_acc}
     Minimum Total Pond Area per Microwatershed: {min_total_pond_area}
@@ -146,6 +146,10 @@ def aggregate_dem(c_path, dem_path, aggregation):
     upscale_factor = 1/aggregation
 
     with rasterio.open(dem_path) as dataset:
+        # Print resolution
+        original_resolution = dataset.res
+        print(f"Original resolution: {original_resolution}")
+
         # Resample data to target shape
         dem = dataset.read(
             out_shape=(
@@ -162,6 +166,10 @@ def aggregate_dem(c_path, dem_path, aggregation):
             (dataset.height / dem.shape[-2])
         )
 
+        # Print the new resolution
+        new_resolution = dataset.res
+        print(f"New resolution: {new_resolution}")
+
         # Write the downsampled data to a new file
         with rasterio.open(
             fr'{c_path}jupyter\\data-inputs\\temp\\{file}_{aggregation}_Agg.tif',
@@ -176,20 +184,20 @@ def aggregate_dem(c_path, dem_path, aggregation):
         ) as dst:
             dst.write(dem)
 
-    dem_agg_path = fr'{c_path}jupyter\\data-inputs\\temp\\{file}_{aggregation}_Agg.tif'
-    grid = Grid.from_raster(dem_agg_path)
-    grid_clip = Grid.from_raster(dem_agg_path) # to be clipped by the delineation extent to preserve the original grid
-    dem = grid.read_raster(dem_agg_path)
+    dem_path = fr'{c_path}jupyter\\data-inputs\\temp\\{file}_{aggregation}_Agg.tif'
+    grid = Grid.from_raster(dem_path)
+    grid_clip = Grid.from_raster(dem_path) # to be clipped by the delineation extent to preserve the original grid
+    dem = grid.read_raster(dem_path)
 
     print("Downsampling complete")
 
-    return dem_agg_path, grid, dem
+    return dem_path, grid, dem
 
-def confirm_crs(dem_agg_path):
+def confirm_crs(dem_path):
     # LOG: Confirm CRS
     import rasterio
     # Open the raster file
-    with rasterio.open(dem_agg_path) as src:
+    with rasterio.open(dem_path) as src:
         crs_dem = src.crs
         print(crs_dem)
 
@@ -200,7 +208,7 @@ def confirm_crs(dem_agg_path):
 
     return crs_dem
 
-def burn_features(c_path, crs_dem, dem_agg_path, burn_width, burn_value, pond_burn_value, dem, file, aggregation):
+def burn_features(c_path, crs_dem, dem_path, burn_width, flowlines_burn_value, osm_burn_value, pond_burn_value, dem, file, aggregation):
     # Burn the NHD Flowlines into the DEM
 
     import geopandas as gpd
@@ -209,13 +217,13 @@ def burn_features(c_path, crs_dem, dem_agg_path, burn_width, burn_value, pond_bu
     import numpy as np
     from shapely.geometry import box
 
-    if burn_value != 0:
+    if flowlines_burn_value != 0:
         # Load the flowlines dataset
         # flow_file_path = 'IRL-Flowlines-Export_NAD83.shp'
         flowlines = gpd.read_file(fr'{c_path}jupyter\\data-inputs\\NHD-Flowlines\\{flow_file_path}')
         flowlines = flowlines.to_crs(epsg=4269)
 
-        with rasterio.open(dem_agg_path) as src:
+        with rasterio.open(dem_path) as src:
             bounds = src.bounds
             # Create a bounding box geometry
             bbox = box(bounds.left, bounds.bottom, bounds.right, bounds.top)
@@ -247,8 +255,8 @@ def burn_features(c_path, crs_dem, dem_agg_path, burn_width, burn_value, pond_bu
 
         # Ensure the flowlines are in the same CRS as the DEM
         # file = 'Terrain_Grant_Valkaria_ClipNoData_AggMedian16_NAD83'
-        # NOTE: replace dem_agg_path with dem_path if the dem isn't being aggregated
-        with rasterio.open(dem_agg_path) as src:
+        # NOTE: replace dem_path with dem_path if the dem isn't being aggregated
+        with rasterio.open(dem_path) as src:
             # flowlines = flowlines.to_crs(src.crs)
             transform = src.transform
             out_shape = src.shape
@@ -265,12 +273,12 @@ def burn_features(c_path, crs_dem, dem_agg_path, burn_width, burn_value, pond_bu
         )
 
         # Read the DEM
-        with rasterio.open(dem_agg_path) as src:
+        with rasterio.open(dem_path) as src:
             dem = src.read(1)  # Read the first band
 
         # PARAMETER: Burn the flowlines into the DEM
-        burn_value = burn_value  # Adjust this value as needed
-        dem_burned = np.where(flowline_raster == 1, dem + burn_value, dem)
+        flowlines_burn_value = flowlines_burn_value  # Adjust this value as needed
+        dem_burned = np.where(flowline_raster == 1, dem + flowlines_burn_value, dem)
 
         # Save the modified DEM
         with rasterio.open(
@@ -286,26 +294,107 @@ def burn_features(c_path, crs_dem, dem_agg_path, burn_width, burn_value, pond_bu
         ) as dst:
             dst.write(dem_burned, 1)
 
-        dem_agg_burn_path = fr'{c_path}jupyter\\data-inputs\\temp\\{file}_{aggregation}_Agg_Burned.tif'
-        grid = Grid.from_raster(dem_agg_burn_path)
-        grid_clip = Grid.from_raster(dem_agg_burn_path) # to be clipped by the delineation extent to preserve the original grid
-        dem = grid.read_raster(dem_agg_burn_path)
+        dem_path = fr'{c_path}jupyter\\data-inputs\\temp\\{file}_{aggregation}_Agg_Burned.tif'
+        grid = Grid.from_raster(dem_path)
+        grid_clip = Grid.from_raster(dem_path) # to be clipped by the delineation extent to preserve the original grid
+        dem = grid.read_raster(dem_path)
 
         print("Flowlines have been burned into the DEM and saved as a new file.")
     else:
-        dem_agg_burn_path = dem_agg_path
-        grid = Grid.from_raster(dem_agg_burn_path)
-        grid_clip = Grid.from_raster(dem_agg_burn_path) # to be clipped by the delineation extent to preserve the original grid
-        dem = grid.read_raster(dem_agg_burn_path)
+        dem_path = dem_path
+        grid = Grid.from_raster(dem_path)
+        grid_clip = Grid.from_raster(dem_path) # to be clipped by the delineation extent to preserve the original grid
+        dem = grid.read_raster(dem_path)
         print("No flowlines were burned into the DEM.")
 
+    if osm_burn_value != 0:
+        # load OSM network
+        with rasterio.open(dem_path) as src:
+            bounds = src.bounds
+            crs = src.crs
+        # Create a bounding box geometry
+        bbox = box(bounds.left, bounds.bottom, bounds.right, bounds.top)
+        bbox_gdf = gpd.GeoDataFrame({'geometry': bbox}, index=[0], crs=src.crs)
+        # Convert the bounding box to a format suitable for OSMnx
+        minx, miny, maxx, maxy = bbox.bounds
+
+        # # Download the street network within the bounding box
+        # G = ox.graph.graph_from_bbox(bbox.bounds, network_type='all')
+        # # Convert the graph to a GeoDataFrame
+        # nodes, edges = ox.graph_to_gdfs(G)
+
+        # TEMP read in edges
+        edges = gpd.read_file(r'data-inputs\\StreetNetwork\\PinedaOsmExport.shp')
+        # Ensure the CRS matches the source CRS
+        edges = edges.to_crs(crs)
+
+        # Convert back to CRS with meters to do the buffer
+        edges = edges.to_crs(epsg=26917)
+        # PARAMETER: burn width
+        edges['geometry'] = edges.geometry.buffer(2)  # Buffer by half the desired width
+        # Convert back to CRS with lat lon
+        edges = edges.to_crs(epsg=4269)
+
+        # Ensure the flowlines are in the same CRS as the DEM
+        # file = 'Terrain_Grant_Valkaria_ClipNoData_AggMedian16_NAD83'
+        with rasterio.open(dem_path) as src:
+            # flowlines = flowlines.to_crs(src.crs)
+            transform = src.transform
+            out_shape = src.shape
+
+
+        # Rasterize the flowlines
+        edges_raster = rasterize(
+            [(geom, 1) for geom in edges.geometry],
+            out_shape=out_shape,
+            transform=transform,
+            fill=0,
+            dtype='uint8',
+            all_touched=True
+        )
+
+        # Read the DEM
+        with rasterio.open(dem_path) as src:
+            dem = src.read(1)  # Read the first band
+
+        # Ensure edges array has the same shape as dem
+        # edges_resized = np.resize(edges, dem.shape)
+
+        dem_burned = np.where(edges_raster == 1, dem - osm_burn_value, dem)
+
+        # Save the modified DEM
+        with rasterio.open(
+            fr'data-inputs\\temp\\{file}_{aggregation}_Agg_Burned_OSM.tif', 
+            'w', 
+            driver='GTiff', 
+            height=dem_burned.shape[0], 
+            width=dem_burned.shape[1], 
+            count=1, 
+            dtype=dem_burned.dtype, 
+            crs=src.crs, 
+            transform=src.transform
+        ) as dst:
+            dst.write(dem_burned, 1)
+
+        dem_path = fr'data-inputs\\temp\\{file}_{aggregation}_Agg_Burned_OSM.tif'
+        grid = Grid.from_raster(dem_path)
+        grid_clip = Grid.from_raster(dem_path) # to be clipped by the delineation extent to preserve the original grid
+        dem = grid.read_raster(dem_path)
+
+        print("OSM Street network has been burned into the DEM and saved as a new file.")
+    else:
+        dem_path = dem_path
+        grid = Grid.from_raster(dem_path)
+        grid_clip = Grid.from_raster(dem_path) # to be clipped by the delineation extent to preserve the original grid
+        dem = grid.read_raster(dem_path)
+        print("No OSM burn value provided. Skipping the burn process.")
 
     if pond_burn_value !=0:
         # Load the pond_burn dataset
         pond_burn = gpd.read_file(r'data-inputs\\IRL-Ponds-Export\\IRL-Ponds-Export_4269.shp')
         pond_burn = pond_burn.to_crs(epsg=4269)
 
-        with rasterio.open(dem_agg_path) as src:
+        with rasterio.open(dem_path) as src:
             bounds = src.bounds
         # Create a bounding box geometry
         bbox = box(bounds.left, bounds.bottom, bounds.right, bounds.top)
@@ -314,7 +403,7 @@ def burn_features(c_path, crs_dem, dem_agg_path, burn_width, burn_value, pond_bu
         # Clip flowlines to DEM extent
         pond_burn_clip = gpd.clip(pond_burn, bbox_gdf)
 
-        with rasterio.open(dem_agg_burn_path) as src:
+        with rasterio.open(dem_path) as src:
             transform = src.transform
             out_shape = src.shape
 
@@ -330,11 +419,11 @@ def burn_features(c_path, crs_dem, dem_agg_path, burn_width, burn_value, pond_bu
         )
 
         # Read the DEM
-        with rasterio.open(dem_agg_burn_path) as src:
+        with rasterio.open(dem_path) as src:
             dem = src.read(1)  # Read the first band
 
 
-        dem_burned = np.where(pond_burn_raster == 1, dem - burn_value, dem)
+        dem_burned = np.where(pond_burn_raster == 1, dem - flowlines_burn_value, dem)
 
         # Save the modified DEM
         with rasterio.open(
@@ -350,22 +439,22 @@ def burn_features(c_path, crs_dem, dem_agg_path, burn_width, burn_value, pond_bu
         ) as dst:
             dst.write(dem_burned, 1)
 
-        dem_agg_pond_burn_path = fr'data-inputs\\temp\\{file}_{aggregation}_Agg_Pond_Burned.tif'
-        grid = Grid.from_raster(dem_agg_pond_burn_path)
-        grid_clip = Grid.from_raster(dem_agg_pond_burn_path) # to be clipped by the delineation extent to preserve the original grid
-        dem = grid.read_raster(dem_agg_pond_burn_path)
+        dem_path = fr'data-inputs\\temp\\{file}_{aggregation}_Agg_Pond_Burned.tif'
+        grid = Grid.from_raster(dem_path)
+        grid_clip = Grid.from_raster(dem_path) # to be clipped by the delineation extent to preserve the original grid
+        dem = grid.read_raster(dem_path)
 
         print("Ponds have been burned into the DEM and saved as a new file.")
     else:
-        dem_agg_pond_burn_path = dem_agg_burn_path
-        grid = Grid.from_raster(dem_agg_pond_burn_path)
-        grid_clip = Grid.from_raster(dem_agg_pond_burn_path) # to be clipped by the delineation extent to preserve the original grid
-        dem = grid.read_raster(dem_agg_pond_burn_path)
+        dem_path = dem_path
+        grid = Grid.from_raster(dem_path)
+        grid_clip = Grid.from_raster(dem_path) # to be clipped by the delineation extent to preserve the original grid
+        dem = grid.read_raster(dem_path)
         print("No burn value provided. Skipping the burn process.")
 
-    return grid, dem, dem_agg_pond_burn_path
+    return grid, dem, dem_path
 
-def plot_burned_dem(dem, grid, pdf_pages, crs_dem, aggregation, burn_value, burn_width, units):
+def plot_burned_dem(dem, grid, pdf_pages, crs_dem, aggregation, flowlines_burn_value, burn_width, units):
     # Plot the DEM
 
     import numpy as np
@@ -384,7 +473,7 @@ def plot_burned_dem(dem, grid, pdf_pages, crs_dem, aggregation, burn_value, burn
     #plt.imshow(dem, extent=grid.extent, cmap='terrain', zorder=1)
     plt.colorbar(label='Elevation (m)')
     plt.grid(zorder=0)
-    plt.title(f'Digital Elevation Map - {aggregation}x{aggregation} - {burn_value} depth, {burn_width*2} wide Burn', size=14)
+    plt.title(f'Digital Elevation Map - {aggregation}x{aggregation} - {flowlines_burn_value} depth, {burn_width*2} wide Burn', size=14)
     plt.xlabel('Longitude')
     plt.ylabel('Latitude')
     plt.tight_layout()
@@ -970,7 +1059,7 @@ def dash_map(filter_df, microwatersheds_filter_gdf):
 
 
 
-def main(file, epsg, units, aggregation, flow_file_path, burn_width, burn_value, pond_burn_value, river_network_min_flow_acc, min_total_pond_area, max_num_ponds):
+def main(file, epsg, units, aggregation, flow_file_path, burn_width, flowlines_burn_value, osm_burn_value, pond_burn_value, river_network_min_flow_acc, min_total_pond_area, max_num_ponds=50):
 
     # If testing locally, use path
     c_path = 'C:\\Users\\alden.summerville\\Documents\\dev-local\\IRL-MIA-development\\'
@@ -980,23 +1069,23 @@ def main(file, epsg, units, aggregation, flow_file_path, burn_width, burn_value,
     ## Run all the consequetive functions
     dem_path, grid, dem = read_reproject_dem(c_path, file)
 
-    pdf_path, pdf_pages = initialize_pdf(c_path, file, epsg, units, aggregation, flow_file_path, burn_width, burn_value, pond_burn_value, river_network_min_flow_acc, min_total_pond_area, max_num_ponds)
+    pdf_path, pdf_pages = initialize_pdf(c_path, file, epsg, units, aggregation, flow_file_path, burn_width, flowlines_burn_value, pond_burn_value, river_network_min_flow_acc, min_total_pond_area, max_num_ponds)
     
     if aggregation != 1:
-        dem_agg_path, grid, dem = aggregate_dem(c_path, dem_path, aggregation)
+        dem_path, grid, dem = aggregate_dem(c_path, dem_path, aggregation)
     else:
         print("Skipped aggregation")
-        dem_agg_path = dem_path
+        dem_path = dem_path
 
-    crs_dem = confirm_crs(dem_agg_path)
+    crs_dem = confirm_crs(dem_path)
 
-    if burn_value or pond_burn_value != 0:
-        grid, dem, dem_agg_burn_path = burn_features(c_path, crs_dem, dem_agg_path, burn_width, burn_value, pond_burn_value, dem, file, aggregation)
+    if flowlines_burn_value or pond_burn_value or osm_burn_value != 0:
+        grid, dem, dem_path = burn_features(c_path, crs_dem, dem_path, burn_width, flowlines_burn_value, osm_burn_value, pond_burn_value, dem, file, aggregation)
     else:
         print("Skipped burning")
-        dem_agg_burn_path = dem_agg_path
+        dem_path = dem_path
 
-    pdf_pages = plot_burned_dem(dem, grid, pdf_pages, crs_dem, aggregation, burn_value, burn_width, units)
+    pdf_pages = plot_burned_dem(dem, grid, pdf_pages, crs_dem, aggregation, flowlines_burn_value, burn_width, units)
 
     branches_, microwatersheds_gdf = delineate_microwatersheds(grid, dem, river_network_min_flow_acc)
 
@@ -1022,7 +1111,7 @@ def main(file, epsg, units, aggregation, flow_file_path, burn_width, burn_value,
 
     pdf_pages, filter_df, microwatersheds_filter_gdf = filter_mws_characteristics(microwatersheds_all_gdf, grid, dem, ponds_intersect, pdf_pages, min_total_pond_area, max_num_ponds, pondsheds)
 
-    export_microwatersheds(microwatersheds_filter_gdf)
+    export_microwatersheds(microwatersheds_all_gdf)
 
     close_pdf(pdf_pages)
 
@@ -1045,7 +1134,14 @@ dems = ["Pineda_Scalgo_8m_NAD83",
         "PalmBay_1m_26917",
         "GrandHarbor_1m_26917",
         "SouthPatrickTIFF",
+        "UpperCanalMosaic_1_10",
         "UpperCanalMosa_1m_NAD83",
+        "IRL-full-region9",
+        "IRL-full-region6",
+        "IRL-full-region3",
+        "IRL-full-region2",
+        "IRL-full-region12",
+        "IRL-full-region13",
         "IRL-full-region"]
 
 flowline_datasets = ["FLA-NHD-Flowlines_NAD83.shp"]
@@ -1057,17 +1153,18 @@ units = st.selectbox("Enter the units of the DEM", ["Meters", "US Foot"])
 aggregation = st.number_input("DEM Aggregation Factor:", min_value=0, value=1)
 flow_file_path = st.selectbox("Enter the clipped flowlines path:", flowline_datasets)
 burn_width = st.number_input("Burn Width:", min_value=1, value=1)
-burn_value = st.number_input("Burn Value:", value=0.0)
+flowlines_burn_value = st.number_input("Burn Value:", value=0.0)
+osm_burn_value = st.number_input("OSM Burn Value:", value=0.0)
 pond_burn_value = st.number_input("Pond Burn Value:", value=0.0)
 river_network_min_flow_acc = st.number_input("Minimum Flow Accumulation - Channels:", min_value=0, value=3000)
 min_total_pond_area = st.number_input("Minimum Total Pond Area per Microwatershed:", min_value=0, value=15)
-max_num_ponds = st.number_input("Max Number of Ponds per Microwatershed:", min_value=0, value=50)
+max_num_ponds = st.number_input("Max Number of Ponds per Microwatershed:", min_value=0, value=25)
 
 
 # Button to run the main function
 if st.button("Run"):
     with st.spinner("Running..."):
-        pdf_path = main(file, epsg, units, aggregation, flow_file_path, burn_width, burn_value, pond_burn_value, river_network_min_flow_acc, min_total_pond_area, max_num_ponds)
+        pdf_path = main(file, epsg, units, aggregation, flow_file_path, burn_width, flowlines_burn_value, pond_burn_value, river_network_min_flow_acc, min_total_pond_area, max_num_ponds)
     st.success("Complete. A report with the key figures is saved to the outputs folder.")
     
     # Open the PDF file
