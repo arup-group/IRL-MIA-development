@@ -122,7 +122,7 @@ def make_basin(row,grid,dem,fdir,
 #                      Main Function
 ######################################################################
 
-def generate_catchments(grid, dem,acc_thresh=100,so_filter=3,
+def generate_catchments(grid, dem,acc_thresh=3000,so_filter=3,
                         routing='d8',algorithm='iterative', shoreline_clip=False):
     '''Full workflow integrating the above functions.
        Process is as follows: 
