@@ -209,6 +209,46 @@ def confirm_crs(dem_path):
 
     return crs_dem
 
+def condition_dem(grid, dem, c_path):
+    from rasterio.transform import from_origin
+
+    print("Conditioning DEM pre-burn...")
+    pit_filled_dem = grid.fill_pits(dem)
+    
+    # Fill depressions in DEM
+    flooded_dem = grid.fill_depressions(pit_filled_dem)
+
+    # Resolve flats in DEM
+    inflated_dem = grid.resolve_flats(flooded_dem)
+
+
+    # Extract necessary information
+    crs = grid.crs  # CRS from the pysheds grid object
+    res = grid.affine[0]  # Resolution (assuming square cells)
+    x_min, y_max = grid.bbox[0], grid.bbox[3]  # Bounding box (xmin, ymax)
+    transform = from_origin(x_min, y_max, res, res)  # Create affine transform
+    output_tif = fr'{c_path}jupyter\\data-inputs\\temp\\TempPostCondition_DEM.tif'
+
+    # Save the array as a GeoTIFF
+    with rasterio.open(
+        output_tif,
+        "w",
+        driver="GTiff",
+        height=inflated_dem.shape[0],
+        width=inflated_dem.shape[1],
+        count=1,
+        dtype=inflated_dem.dtype,
+        crs=crs,
+        transform=transform,
+    ) as dst:
+        dst.write(inflated_dem, 1)
+
+    dem_path_cd = output_tif
+    grid_cd = Grid.from_raster(dem_path_cd)
+    dem_cd = grid.read_raster(dem_path_cd)
+
+    return grid_cd, dem_cd, dem_path_cd
+
 def burn_features(c_path, crs_dem, dem_path, burn_width, flowlines_burn_value, osm_burn_value, pond_burn_value, dem, file, aggregation):
     # Burn the NHD Flowlines into the DEM
 
@@ -262,6 +302,7 @@ def burn_features(c_path, crs_dem, dem_path, burn_width, flowlines_burn_value, o
             transform = src.transform
             out_shape = src.shape
 
+        print("Length of flowlines: ", len(flowlines_clip))
 
         # Rasterize the flowlines
         flowline_raster = rasterize(
@@ -303,9 +344,9 @@ def burn_features(c_path, crs_dem, dem_path, burn_width, flowlines_burn_value, o
         print("Flowlines have been burned into the DEM and saved as a new file.")
     else:
         dem_path = dem_path
-        grid = Grid.from_raster(dem_path)
-        grid_clip = Grid.from_raster(dem_path) # to be clipped by the delineation extent to preserve the original grid
-        dem = grid.read_raster(dem_path)
+        # grid = Grid.from_raster(dem_path)
+        # grid_clip = Grid.from_raster(dem_path) # to be clipped by the delineation extent to preserve the original grid
+        # dem = grid.read_raster(dem_path)
         print("No flowlines were burned into the DEM.")
 
     if osm_burn_value != 0:
@@ -385,9 +426,9 @@ def burn_features(c_path, crs_dem, dem_path, burn_width, flowlines_burn_value, o
         print("OSM Street network has been burned into the DEM and saved as a new file.")
     else:
         dem_path = dem_path
-        grid = Grid.from_raster(dem_path)
-        grid_clip = Grid.from_raster(dem_path) # to be clipped by the delineation extent to preserve the original grid
-        dem = grid.read_raster(dem_path)
+        # grid = Grid.from_raster(dem_path)
+        # grid_clip = Grid.from_raster(dem_path) # to be clipped by the delineation extent to preserve the original grid
+        # dem = grid.read_raster(dem_path)
         print("No OSM burn value provided. Skipping the burn process.")
 
     if pond_burn_value !=0:
@@ -448,9 +489,9 @@ def burn_features(c_path, crs_dem, dem_path, burn_width, flowlines_burn_value, o
         print("Ponds have been burned into the DEM and saved as a new file.")
     else:
         dem_path = dem_path
-        grid = Grid.from_raster(dem_path)
-        grid_clip = Grid.from_raster(dem_path) # to be clipped by the delineation extent to preserve the original grid
-        dem = grid.read_raster(dem_path)
+        # grid = Grid.from_raster(dem_path)
+        # grid_clip = Grid.from_raster(dem_path) # to be clipped by the delineation extent to preserve the original grid
+        # dem = grid.read_raster(dem_path)
         print("No burn value provided. Skipping the burn process.")
 
     return grid, dem, dem_path
@@ -484,11 +525,11 @@ def plot_burned_dem(dem, grid, pdf_pages, crs_dem, aggregation, flowlines_burn_v
 
     return pdf_pages
 
-def delineate_microwatersheds(grid, dem, river_network_min_flow_acc):
+def delineate_microwatersheds(grid, dem, dem_cd, river_network_min_flow_acc, condition_burn):
     # NEW METHOD to delineate the catchments and stream orders 
     import make_catchments
 
-    basins_, branches_ = make_catchments.generate_catchments(grid, dem,acc_thresh=river_network_min_flow_acc,so_filter=4, shoreline_clip=True)
+    basins_, branches_ = make_catchments.generate_catchments(grid, dem, condition_burn, dem_cd, acc_thresh=river_network_min_flow_acc,so_filter_max=4, shoreline_clip=True)
     print("Pysheds complete")
 
     # Visualize output
@@ -806,6 +847,21 @@ def calculate_pondshed_impervious(raster_path, microwatersheds_gdf, pondsheds):
 
     return microwatersheds_gdf
 
+def get_annual_rainfall(gdf, raster_path):
+    # Compute zonal statistics (mean value of raster within each polygon)
+    stats = zonal_stats(
+        gdf,
+        raster_path,
+        stats="mean",  # You can use other statistics like "min", "max", etc.
+        all_touched=True # to ensure all pixels intersecting the polygon are included
+    )
+
+    # Extract the mean rainfall values and add them as a new column
+    gdf['AnnualRainfallMm'] = [stat['mean'] for stat in stats] # dataset has units of mm
+    gdf['AnnualRainfallInches'] = gdf['AnnualRainfallMm'] / 25.4
+
+    return gdf
+
 def annual_control_volume(gdf):
     """
     Processes a GeoDataFrame to calculate and add the following columns:
@@ -819,14 +875,24 @@ def annual_control_volume(gdf):
     Returns:
         GeoDataFrame: Updated GeoDataFrame with new calculated columns.
     """
-    def calculate_annual_runoff(pondshed_impervious_area_ac, annual_rainfall_in, runoff_coefficient=1.0):
-        """Calculate Annual Runoff (MG/yr)."""
-        return pondshed_impervious_area_ac * annual_rainfall_in * runoff_coefficient * 0.027154
     
-    def calculate_incremental_wet_weather_capture(pondshed_impervious_area_ac, annual_rainfall_in, annual_runoff_mgyr, passive_volume_acft, cmac_volume_acft):
-        """Calculate Incremental Annual Wet Weather Capture (MG/yr)."""
-        passive_volume_inIA = (passive_volume_acft / pondshed_impervious_area_ac) * 12
-        cmac_volume_inIA = (cmac_volume_acft / pondshed_impervious_area_ac) * 12
+    def calculate_annual_runoff(impervious_area_ac, annual_rainfall_in, runoff_coefficient=1.0):
+        """Calculate Annual Runoff (MG/yr)."""
+        return impervious_area_ac * annual_rainfall_in * runoff_coefficient * 0.027154
+    
+    def calculate_incremental_wet_weather_capture(impervious_area_ac, annual_rainfall_in, annual_runoff_mgyr, passive_volume_acft, cmac_volume_acft):
+        import math
+
+        # Calculate Incremental Annual Wet Weather Capture (MG/yr).
+        if impervious_area_ac == 0:
+            # If area is zero, set it to a negligible number to ensure the division is possible
+            impervious_area_ac = 0.001
+            passive_volume_inIA = (passive_volume_acft / impervious_area_ac) * 12
+            cmac_volume_inIA = (cmac_volume_acft / impervious_area_ac) * 12
+        else:
+            passive_volume_inIA = (passive_volume_acft / impervious_area_ac) * 12
+            cmac_volume_inIA = (cmac_volume_acft / impervious_area_ac) * 12
+
         
         A, B = 25.07, 20.864
         intercept, precip_coef, ln_precip, ln_Vol = 124.24, 0.3415, -22.161, 27.417
@@ -840,7 +906,7 @@ def annual_control_volume(gdf):
     gdf['AnnualRunoffMGYr'] = gdf.apply(lambda row: calculate_annual_runoff(row['ImperviousAreaAcres'], row['AnnualRainfallInches']), axis=1)
     gdf['Annual_Volume_Treated_MG/Yr'] = gdf.apply(
         lambda row: calculate_incremental_wet_weather_capture(
-            row['PondshedImperviousAreaAcres'],
+            row['ImperviousAreaAcres'],
             row['AnnualRainfallInches'],
             row['AnnualRunoffMGYr'],
             row['Pond_Controllable_Volume_Ac-Ft'],
@@ -992,6 +1058,7 @@ def filter_mws_characteristics(microwatersheds_all_gdf, grid, dem, ponds_interse
     microwatersheds_filter_gdf.rename(columns={'Pond_Area_Percentage': 'Pond /_MWS Area_Percentage'}, inplace=True)
     microwatersheds_filter_gdf.rename(columns={'Pondshed_to_MWS_Percentage': 'Pondshed /_MWS Area_Percentage'}, inplace=True)
     microwatersheds_filter_gdf.rename(columns={'Microwatershed_ID': 'Microwshed_ID'}, inplace=True)
+    microwatersheds_filter_gdf.rename(columns={'Nitrogen_lb': 'Nitrogen_Lb_ByLandUse'}, inplace=True)
 
     # Select only the specified columns and order by Total_Pond_Area_Acres
     columns_to_display = ['Microwshed_ID', 
@@ -1001,11 +1068,11 @@ def filter_mws_characteristics(microwatersheds_all_gdf, grid, dem, ponds_interse
                         'Total_Pond_Area_Acres', 
                         'Total_Pondshed_Area_Acres',
                         # 'Pondshed_to_Pond_Ratio',
-                        'Pond /_MWS Area_Percentage',
+                        # 'Pond /_MWS Area_Percentage',
                         'Pondshed /_MWS Area_Percentage',
                         'Pond_Controllable_Volume_Ac-Ft', 
                         'Annual_Volume_Treated_MG/Yr', 
-                        'Nitrogen_lb', 
+                        'Nitrogen_Lb_ByLandUse', 
                         'Total_Nitrogen_(Lb/Yr)', 
                         'Controllable_Nitrogen_(Lb/Yr)',
                         # 'Total_Phosphorous_(Lb/Yr)', 
@@ -1022,11 +1089,11 @@ def filter_mws_characteristics(microwatersheds_all_gdf, grid, dem, ponds_interse
         'Total_Pond_Area_Acres': '{:.2f}',
         'Total_Pondshed_Area_Acres': '{:.2f}',
         # 'Pondshed_to_Pond_Ratio': '{:.2f}',
-        'Pond /_MWS Area_Percentage': '{:.2f}',
+        # 'Pond /_MWS Area_Percentage': '{:.2f}',
         'Pondshed /_MWS Area_Percentage': '{:.2f}',
         'Pond_Controllable_Volume_Ac-Ft': '{:.2f}',
         'Annual_Volume_Treated_MG/Yr': '{:.2f}',
-        'Nitrogen_lb': '{:.4f}',
+        'Nitrogen_Lb_ByLandUse': '{:.4f}',
         'Total_Nitrogen_(Lb/Yr)': '{:.2f}',
         'Controllable_Nitrogen_(Lb/Yr)': '{:.2f}',
         # 'Total_Phosphorous_(Lb/Yr)': '{:.2f}',
@@ -1066,11 +1133,11 @@ def filter_mws_characteristics(microwatersheds_all_gdf, grid, dem, ponds_interse
         'Total_Pondshed_Area_Acres': plt.cm.plasma,
         # 'Pondshed_to_Pond_Ratio': plt.cm.plasma,
         # 'Average_Pond_Area_Acres': plt.cm.plasma,
-        'Pond /_MWS Area_Percentage': plt.cm.plasma,
+        # 'Pond /_MWS Area_Percentage': plt.cm.plasma,
         'Pondshed /_MWS Area_Percentage': plt.cm.plasma,
         'Pond_Controllable_Volume_Ac-Ft': plt.cm.plasma,
         'Annual_Volume_Treated_MG/Yr': plt.cm.plasma,
-        'Nitrogen_lb': plt.cm.plasma,
+        'Nitrogen_Lb_ByLandUse': plt.cm.plasma,
         'Total_Nitrogen_(Lb/Yr)': plt.cm.plasma,
         'Controllable_Nitrogen_(Lb/Yr)': plt.cm.plasma,
         # 'Total_Phosphorous_(Lb/Yr)': plt.cm.plasma,
@@ -1190,7 +1257,7 @@ def dash_map(filter_df, microwatersheds_filter_gdf):
 
 
 
-def main(file, epsg, units, aggregation, flow_file_path, burn_width, flowlines_burn_value, osm_burn_value, pond_burn_value, river_network_min_flow_acc, min_total_pond_area, max_num_ponds=50):
+def main(file, epsg, units, aggregation, flow_file_path, condition_burn, burn_width, flowlines_burn_value, osm_burn_value, pond_burn_value, river_network_min_flow_acc, min_total_pond_area, max_num_ponds=50):
 
     # If testing locally, use path
     c_path = 'C:\\Users\\alden.summerville\\Documents\\dev-local\\IRL-MIA-development\\'
@@ -1210,7 +1277,11 @@ def main(file, epsg, units, aggregation, flow_file_path, burn_width, flowlines_b
 
     crs_dem = confirm_crs(dem_path)
 
+    grid_cd, dem_cd, dem_path_cd = condition_dem(grid, dem, c_path)
+
     if flowlines_burn_value or pond_burn_value or osm_burn_value != 0:
+        if condition_burn == 1:
+            grid_cd, dem_cd, dem_path_cd = burn_features(c_path, crs_dem, dem_path_cd, burn_width, flowlines_burn_value, osm_burn_value, pond_burn_value, dem_cd, file, aggregation)
         grid, dem, dem_path = burn_features(c_path, crs_dem, dem_path, burn_width, flowlines_burn_value, osm_burn_value, pond_burn_value, dem, file, aggregation)
     else:
         print("Skipped burning")
@@ -1218,7 +1289,7 @@ def main(file, epsg, units, aggregation, flow_file_path, burn_width, flowlines_b
 
     pdf_pages = plot_burned_dem(dem, grid, pdf_pages, crs_dem, aggregation, flowlines_burn_value, burn_width, units)
 
-    branches_, microwatersheds_gdf = delineate_microwatersheds(grid, dem, river_network_min_flow_acc)
+    branches_, microwatersheds_gdf = delineate_microwatersheds(grid, dem, dem_cd, river_network_min_flow_acc, condition_burn)
 
     pdf_pages = plot_microwatersheds(dem, grid, microwatersheds_gdf, branches_, pdf_pages)
 
@@ -1238,9 +1309,12 @@ def main(file, epsg, units, aggregation, flow_file_path, burn_width, flowlines_b
     microwatersheds_all_gdf = calculate_impervious_percentage(impervious_raster, microwatersheds_all_gdf)
     microwatersheds_all_gdf = calculate_pondshed_impervious(impervious_raster, microwatersheds_all_gdf, pondsheds)
 
+    rainfall_data = 'data-inputs\\temp\\temp_reprojected_raster_rainfall.tif'
+    microwatersheds_all_gdf = get_annual_rainfall(microwatersheds_all_gdf, rainfall_data)
+
     microwatersheds_all_gdf = annual_control_volume(microwatersheds_all_gdf)
 
-    land_cover = gpd.read_file(r'data-inputs\\LandCover\\Land_Cover_FLA_4326.shp')
+    land_cover = gpd.read_file(r'data-inputs\\LandCover\\Land_Cover_IRL_4326.shp')
     microwatersheds_all_gdf = urban_area(land_cover, microwatersheds_all_gdf)
     microwatersheds_all_gdf = calculate_nutrients(land_cover, microwatersheds_all_gdf)
 
@@ -1285,13 +1359,19 @@ flowline_datasets = ["FLA-NHD-Flowlines_NAD83.shp"]
 file = st.selectbox("Enter the DEM file name (without extension):", dems)
 epsg = st.selectbox("Enter the EPSG code (2881 for StatePlane Florida East. 26917 for NAD83 Zone 17N):", ["26917", "2881"])
 units = st.selectbox("Enter the units of the DEM", ["Meters", "US Foot"])
+river_network_min_flow_acc = st.number_input("Minimum Flow Accumulation - Channels:", min_value=0, value=2500)
+
 aggregation = st.number_input("DEM Aggregation Factor:", min_value=0, value=1)
+pre_condition_smooth = st.number_input("Pre-condition smooth factor:", min_value=0, value=0)
+
 flow_file_path = st.selectbox("Enter the clipped flowlines path:", flowline_datasets)
+
+condition_burn = st.selectbox("Burn after condition?", [0,1])
 burn_width = st.number_input("Burn Width:", min_value=1, value=1)
 flowlines_burn_value = st.number_input("Burn Value:", value=0.0)
 osm_burn_value = st.number_input("OSM Burn Value:", value=0.0)
 pond_burn_value = st.number_input("Pond Burn Value:", value=0.0)
-river_network_min_flow_acc = st.number_input("Minimum Flow Accumulation - Channels:", min_value=0, value=3000)
+
 min_total_pond_area = st.number_input("Minimum Total Pond Area per Microwatershed:", min_value=0, value=15)
 max_num_ponds = st.number_input("Max Number of Ponds per Microwatershed:", min_value=0, value=25)
 
@@ -1299,7 +1379,7 @@ max_num_ponds = st.number_input("Max Number of Ponds per Microwatershed:", min_v
 # Button to run the main function
 if st.button("Run"):
     with st.spinner("Running..."):
-        pdf_path = main(file, epsg, units, aggregation, flow_file_path, burn_width, flowlines_burn_value, pond_burn_value, river_network_min_flow_acc, min_total_pond_area, max_num_ponds)
+        pdf_path = main(file, epsg, units, aggregation, flow_file_path, condition_burn, burn_width, flowlines_burn_value, osm_burn_value, pond_burn_value, river_network_min_flow_acc, min_total_pond_area, max_num_ponds)
     st.success("Complete. A report with the key figures is saved to the outputs folder.")
     
     # Open the PDF file

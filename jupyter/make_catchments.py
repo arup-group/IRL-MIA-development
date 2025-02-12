@@ -41,7 +41,7 @@ def calc_attributes(row,dem,profiles,so):
     # where all values are equal to the stream order for that profile.
     # so if it is a 1st order channel, the array has all 1's. 
     
-    row['Slope'] = np.rad2deg(np.arctan2(row['Relief'],row['Length']))
+    # row['Slope'] = np.rad2deg(np.arctan2(row['Relief'],row['Length']))
     row['Index'] = row.name
     return row 
 
@@ -122,7 +122,7 @@ def make_basin(row,grid,dem,fdir,
 #                      Main Function
 ######################################################################
 
-def generate_catchments(grid, dem,acc_thresh=3000,so_filter=3,
+def generate_catchments(grid, dem, condition_burn, dem_cd, acc_thresh=3000,so_filter_min=1, so_filter_max=4,
                         routing='d8',algorithm='iterative', shoreline_clip=False):
     '''Full workflow integrating the above functions.
        Process is as follows: 
@@ -140,143 +140,29 @@ def generate_catchments(grid, dem,acc_thresh=3000,so_filter=3,
     
     local_start = time.time()
     
-    pit_filled_dem = grid.fill_pits(dem)
+    if condition_burn == 0:
+        print("Pysheds - conditioning DEM")
+        pit_filled_dem = grid.fill_pits(dem)
     
-    # Fill depressions in DEM
-    flooded_dem = grid.fill_depressions(pit_filled_dem)
+        # Fill depressions in DEM
+        flooded_dem = grid.fill_depressions(pit_filled_dem)
     
-    # Resolve flats in DEM
-    inflated_dem = grid.resolve_flats(flooded_dem)
+        # Resolve flats in DEM
+        inflated_dem = grid.resolve_flats(flooded_dem)
+
     # Specify directional mapping
     dirmap = (64, 128, 1, 2, 4, 8, 16, 32)
-
-    print("Pysheds - started post conditioning burn")
-    # Try burning here?
-    import geopandas as gpd
-    import rasterio
-    from rasterio.features import rasterize
-    import numpy as np
-    from shapely.geometry import box
-    # Save the reprojected raster
-    crs_path = 'data-inputs\\temp\\temp_reprojected_raster.tif'
-    with rasterio.open(crs_path) as src:
-        temp = src.read(1)  # Read the first band
-
-    with rasterio.open(
-        "data-inputs\\temp\\TempPostCondition_DEM.tif",
-        "w",
-        driver="GTiff",
-        width=inflated_dem.shape[1],
-        height=inflated_dem.shape[0],
-        count=1,
-        dtype=inflated_dem.dtype,
-        crs=src.crs,
-        transform=src.transform
-    ) as dst:
-        dst.write(inflated_dem, 1)
-
-    dem_path = "data-inputs\\temp\\TempPostCondition_DEM.tif"
-    grid_cd = Grid.from_raster(dem_path)
-    dem_cd = grid_cd.read_raster(dem_path)
-    print("Pysheds - wrote raster")
-
-    # PARAMETER: Burn the flowlines into the DEM
-    burn_value = 0  # Adjust this value as needed
-
-
-    if burn_value != 0:
-        # Load the flowlines dataset
-        print('Pysheds - in burn value code')
-        flowlines = gpd.read_file(r'data-inputs\\NHD-Flowlines\\FLA-NHD-Flowlines_NAD83.shp')
-        flowlines = flowlines.to_crs(epsg=4269)
-
-        # with rasterio.open(dem_path) as src:
-        #     bounds = src.bounds
-        # # Create a bounding box geometry
-        # bbox = box(bounds.left, bounds.bottom, bounds.right, bounds.top)
-        # bbox_gdf = gpd.GeoDataFrame({'geometry': bbox}, index=[0], crs=src.crs)
-
-        # # Clip flowlines to DEM extent
-        # flowlines_clip = gpd.clip(flowlines, bbox_gdf)
-
-        # # Convert back to CRS with meters to do the buffer
-        # flowlines_clip = flowlines_clip.to_crs(epsg=26917)
-        # # PARAMETER: burn width
-        # flowlines_clip['geometry'] = flowlines_clip.geometry.buffer(1)  # Buffer by half the desired width
-        # # Convert back to CRS with lat lon
-        # flowlines_clip = flowlines_clip.to_crs(epsg=4269)
-
-        # # Load the shorelines dataset
-        # shoreline = gpd.read_file(r'data-inputs\\Shoreline\\FLA-Shoreline_4269.shp')
-
-        # from shapely.geometry import Polygon
-        # # Clip the shoreline dataset to the AOI
-        # area_of_interest = Polygon([(grid.bbox[0], grid.bbox[1]), (grid.bbox[0], grid.bbox[3]), (grid.bbox[2], grid.bbox[3]), (grid.bbox[2], grid.bbox[1]), (grid.bbox[0], grid.bbox[1])])
-        # area_of_interest = gpd.GeoDataFrame(index=[0], crs="EPSG:4269", geometry=[area_of_interest])
-
-        # shoreline_clip_temp = gpd.clip(shoreline, area_of_interest)
-
-        # shoreline_clip_temp = shoreline_clip_temp[shoreline_clip_temp['ATTRIBUTE'] != 'Land']
-        # shoreline_clip_temp = shoreline_clip_temp[shoreline_clip_temp['Shape_Area'] > 0.000002]
-
-        # print("performing shoreline clip...")
-        # # Clip the channels polyline by the shoreline dataset
-        # flowlines_clip = gpd.clip(flowlines_clip, shoreline_clip_temp)
-
-        # Ensure the flowlines are in the same CRS as the DEM
-        # file = 'Terrain_Grant_Valkaria_ClipNoData_AggMedian16_NAD83'
-        with rasterio.open(dem_path) as src:
-            # flowlines = flowlines.to_crs(src.crs)
-            transform = src.transform
-            out_shape = src.shape
-
-
-        # Rasterize the flowlines
-        flowline_raster = rasterize(
-            [(geom, 1) for geom in flowlines.geometry],
-            out_shape=out_shape,
-            transform=transform,
-            fill=0,
-            dtype='uint8',
-            all_touched=True
-        )
-
-        # Read the DEM
-        with rasterio.open(dem_path) as src:
-            dem = src.read(1)  # Read the first band
-
-
-        dem_burned = np.where(flowline_raster == 1, dem - burn_value, dem)
-
-        # Save the modified DEM
-        with rasterio.open(
-            fr'data-inputs\\temp\\Agg_Burned.tif', 
-            'w', 
-            driver='GTiff', 
-            height=dem_burned.shape[0], 
-            width=dem_burned.shape[1], 
-            count=1, 
-            dtype=dem_burned.dtype, 
-            crs=src.crs, 
-            transform=src.transform
-        ) as dst:
-            dst.write(dem_burned, 1)
-
-        dem_agg_burn_path = fr'data-inputs\\temp\\Agg_Burned.tif'
-        grid = Grid.from_raster(dem_agg_burn_path)
-        grid_clip = Grid.from_raster(dem_agg_burn_path) # to be clipped by the delineation extent to preserve the original grid
-        dem = grid.read_raster(dem_agg_burn_path)
-
-        print("Flowlines have been burned into the DEM and saved as a new file.")
-    else:
-        print("No burn value provided. Skipping the burn process.")
 
     print("Pysheds flow direction...")
     # Compute flow directions
     # -------------------------------------
     # fdir = grid.flowdir(dem, dirmap=dirmap)
-    fdir = grid.flowdir(inflated_dem, dirmap=dirmap)
-    
+    if condition_burn == 0:
+        fdir = grid.flowdir(inflated_dem, dirmap=dirmap)
+    if condition_burn == 1:
+        fdir = grid.flowdir(dem_cd, dirmap=dirmap)
+        
+
     # make flow accumulation raster
     print('Pysheds flow accumulaton map...')
     acc = grid.accumulation(fdir, dirmap=dirmap)
@@ -292,10 +178,47 @@ def generate_catchments(grid, dem,acc_thresh=3000,so_filter=3,
     branches = grid.extract_river_network(fdir=fdir,mask=mask) # returns geojson
     print(len(branches['features']), "branches generated")
 
+    # Filter stream order before clipping?
+
+    branch_gdf = gpd.GeoDataFrame.from_features(branches,crs='epsg:4326')
+    print(branch_gdf.columns)
+    branches_all = branch_gdf
+
+    # generate profiles for each individual segment
+    print('Pysheds generating profiles...')
+    profiles, connections = grid.extract_profiles(fdir=fdir,mask=mask,include_endpoint=False)
+    
+    print('Pysheds calculating attributes...')
+    branch_gdf = branch_gdf.apply(lambda x: calc_attributes(x,dem,profiles,so),axis=1)
+    print(branch_gdf.columns)
+    coords = dem.coords
+
+    # Filter by stream order
+    
+    print('Pysheds making connections...')
+    profile_list, connection_list = make_connections(profiles, connections)
+    
+    # filter by stream order
+    if so_filter_max:
+        branch_gdf = branch_gdf[(branch_gdf['Order']>=so_filter_min) & (branch_gdf['Order']<=so_filter_max)]
+
+    # create all profile and connection lists w/ pour points
+    print('Calculating pour points...')
+    branch_gdf = branch_gdf.apply(lambda x: make_profile(x,so,coords,profile_list,connection_list),axis=1)
+    
+    branch_gdf_copy = branch_gdf.copy() # unfiltered copy to return at end
+    
+    # some of these sections will have duplicate orders and pour points - drop them
+    unique = branch_gdf[['Order','LocalPP_X','LocalPP_Y','Final_Chain_Val']].drop_duplicates()
+    
+    branch_gdf = branch_gdf.loc[unique.index]
+    
+
     # Clip branches to IRL region****
     print("Clipping branches to IRL region")
     irl_region = gpd.read_file(r'data-inputs\\IRL-boundary\\IRL-AOI_4326.shp')
-    branches = gpd.GeoDataFrame.from_features(branches,crs='epsg:4326')
+    # branches = gpd.GeoDataFrame.from_features(branches,crs='epsg:4326')
+    branches = branch_gdf
     # print(type(branches), branches.crs)
     branches = gpd.clip(branches, irl_region)
     print("Post IRL clip")
@@ -329,28 +252,7 @@ def generate_catchments(grid, dem,acc_thresh=3000,so_filter=3,
     
     
 
-    # generate profiles for each individual segment
-    profiles, connections = grid.extract_profiles(fdir=fdir,mask=mask,include_endpoint=False)
-     
-    branch_gdf = branch_gdf.apply(lambda x: calc_attributes(x,dem,profiles,so),axis=1)
-    coords = dem.coords
     
-    profile_list, connection_list = make_connections(profiles, connections)
-    
-    # create all profile and connection lists w/ pour points
-    print('Calculating pour points...')
-    branch_gdf = branch_gdf.apply(lambda x: make_profile(x,so,coords,profile_list,connection_list),axis=1)
-    
-    branch_gdf_copy = branch_gdf.copy() # unfiltered copy to return at end
-    
-    # some of these sections will have duplicate orders and pour points - drop them
-    unique = branch_gdf[['Order','LocalPP_X','LocalPP_Y','Final_Chain_Val']].drop_duplicates()
-    
-    branch_gdf = branch_gdf.loc[unique.index]
-    
-    # filter by stream order
-    if so_filter:
-        branch_gdf = branch_gdf[branch_gdf['Order']<=so_filter]
     
     print('Pysheds generating',len(branch_gdf),'catchments...')
     branch_gdf = branch_gdf.apply(lambda x: make_basin(x,grid,dem,fdir,routing,algorithm),axis=1)
@@ -382,7 +284,7 @@ def generate_catchments(grid, dem,acc_thresh=3000,so_filter=3,
     
     print('Total runtime is',str(local_total/60),'minutes')
     
-    return b_copy, branch_gdf_copy
+    return b_copy, branch_gdf_copy, branches_all
 
 
 
