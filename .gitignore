@@ -3,6 +3,7 @@ venv
 venv39
 venv39_2
 venv39_dash
+venv39_leafmap
 /jupyter/data-inputs/
 /jupyter/outputs/shp
 /jupyter/outputs/
