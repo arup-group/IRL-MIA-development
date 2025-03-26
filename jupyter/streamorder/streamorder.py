@@ -1,11 +1,11 @@
-#!/usr/bin/env python
+make_catchments_b#!/usr/bin/env python
 # coding: utf-8
 
 # In[1]:
 
 
 import folium
-import make_catchments
+import jupyter.streamorder.make_catchments_b as make_catchments_b
 
 
 # In[ ]:
@@ -56,7 +56,7 @@ with rasterio.open("Terrain_Melbourne-2.tif") as src:
 # In[30]:
 
 
-basins, branches = make_catchments.generate_catchments('reprojected_raster.tif',acc_thresh=3000,so_filter=4)
+basins, branches = make_catchments_b.generate_catchments('reprojected_raster.tif',acc_thresh=3000,so_filter=4)
 
 
 # In[31]:

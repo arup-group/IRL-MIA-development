@@ -135,7 +135,7 @@ def make_basin(row,grid,dem,fdir,
 #                      Main Function
 ######################################################################
 
-def generate_catchments(grid, dem, dem_path, condition_burn, dem_cd, acc_thresh=3000,so_filter_min=1, so_filter_max=4,
+def generate_catchments(grid, dem, dem_path, condition, acc_thresh=3000,so_filter_min=1, so_filter_max=4,
                         routing='d8',algorithm='iterative', shoreline_clip=False):
     '''Full workflow integrating the above functions.
        Process is as follows: 
@@ -154,7 +154,7 @@ def generate_catchments(grid, dem, dem_path, condition_burn, dem_cd, acc_thresh=
     local_start = time.time()
     step_start = time.time()
     
-    if condition_burn == 0:
+    if condition == 1:
         print("Pysheds - conditioning DEM")
         pit_filled_dem = grid.fill_pits(dem)
     
@@ -175,12 +175,10 @@ def generate_catchments(grid, dem, dem_path, condition_burn, dem_cd, acc_thresh=
     # Compute flow directions
     # -------------------------------------
     # fdir = grid.flowdir(dem, dirmap=dirmap)
-    if condition_burn == 2:
+    if condition == 0:
         fdir = grid.flowdir(dem, dirmap=dirmap)
-    if condition_burn == 0:
+    if condition == 1:
         fdir = grid.flowdir(inflated_dem, dirmap=dirmap)
-    if condition_burn == 1:
-        fdir = grid.flowdir(dem_cd, dirmap=dirmap)
     local_total = (time.time() - step_start)
     print('Runtime ',str(local_total/60),'minutes')
     step_start = time.time()
@@ -245,7 +243,7 @@ def generate_catchments(grid, dem, dem_path, condition_burn, dem_cd, acc_thresh=
     # create all profile and connection lists w/ pour points
     print('Calculating pour points...')
     # branch_gdf = branch_gdf.apply(lambda x: make_profile(x,so,coords,profile_list,connection_list),axis=1)
-    branch_gdf[['LocalPP_X', 'LocalPP_Y']] = branch_gdf.apply(lambda x: make_profile(x, so, coords, profile_list), axis=1)
+    branch_gdf[['LocalPP_X', 'LocalPP_Y']] = branch_gdf.apply(lambda x: make_profile(x, so, coords, profile_list, connection_list), axis=1)
 
     # branch_drop_cols = ['Profile','Chain'] #,'Profile','Chain']
     # branch_gdf.drop(branch_drop_cols,axis=1,inplace=True)
@@ -253,7 +251,7 @@ def generate_catchments(grid, dem, dem_path, condition_burn, dem_cd, acc_thresh=
     # branch_gdf_copy = branch_gdf.copy() # unfiltered copy to return at end
     
     # some of these sections will have duplicate orders and pour points - drop them
-    unique = branch_gdf[['Order','LocalPP_X','LocalPP_Y','Final_Chain_Val']].drop_duplicates()
+    unique = branch_gdf[['Order','LocalPP_X','LocalPP_Y']].drop_duplicates()
     
     branch_gdf = branch_gdf.loc[unique.index]
 
@@ -326,7 +324,7 @@ def generate_catchments(grid, dem, dem_path, condition_burn, dem_cd, acc_thresh=
 
     basins_gdf['AreaSqKm'] = copy_for_area['AreaSqKm']
     
-    basin_drop_cols = ['geometry','LocalPP'] #,'Profile','Chain']
+    basin_drop_cols = ['geometry'] #'LocalPP','Profile','Chain']
     # branch_drop_cols = ['LocalPP','Profile','Chain'] #,'Profile','Chain']
     
     basins_gdf.drop(basin_drop_cols,axis=1,inplace=True)
