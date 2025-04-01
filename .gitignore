@@ -5,7 +5,12 @@ venv39_2
 venv39_dash
 venv39_leafmap
 venv39_leafmaptest
-/jupyter/data-inputs/
+/jupyter/data-inputs/DEM
+/jupyter/data-inputs/leafmap
+/jupyter/data-inputs/ImperviousArea
+/jupyter/data-inputs/NHD-Flowlines
+/jupyter/data-inputs/StreetNetwork
+/jupyter/data-inputs/temp
 /jupyter/outputs/shp
 /jupyter/outputs/
 cache
