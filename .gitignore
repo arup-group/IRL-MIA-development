@@ -9,3 +9,5 @@ venv39_leafmaptest
 /jupyter/outputs/shp
 /jupyter/outputs/
 cache
+/jupyter/cache
+/jupyter/__pycache__
