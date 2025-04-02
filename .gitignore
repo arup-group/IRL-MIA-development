@@ -1,10 +1,8 @@
 .venv
+.devcontainer
 venv
-venv39
-venv39_2
-venv39_dash
-venv39_leafmap
-venv39_leafmaptest
+venv39_dem
+venv39_mws
 /jupyter/data-inputs/DEM
 /jupyter/data-inputs/leafmap
 /jupyter/data-inputs/ImperviousArea
