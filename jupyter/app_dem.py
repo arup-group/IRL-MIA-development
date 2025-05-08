@@ -69,14 +69,17 @@ def plot_dem(dem_path):
     dem = np.where(dem == src.nodata, np.nan, dem)
 
     # Plot the DEM
-    plt.figure(figsize=(8, 6))
-    plt.imshow(dem, cmap="terrain", extent=extent, origin="upper")
-    plt.colorbar(label="Elevation (m)")
-    plt.xlabel("Longitude")
-    plt.ylabel("Latitude")
-    plt.title("Digital Elevation Model (DEM)")
-    plt.show()
+    fig, ax = plt.subplots(figsize=(8, 6))
+    im = ax.imshow(dem, cmap="terrain", extent=extent, origin="upper")
+    cbar = fig.colorbar(im, ax=ax, label="Elevation (m)")
+    ax.set_xlabel("Longitude")
+    ax.set_ylabel("Latitude")
+    ax.set_title("Digital Elevation Model (DEM)")
+
+    # Show the plot in Streamlit
+    st.pyplot(fig)
     st.info("Plotting complete!")
+
 
 # Define Streamlit app layout and functionality
 st.title("Draw a Polygon, Process DEM, and View Results")
