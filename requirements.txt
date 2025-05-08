@@ -11,4 +11,3 @@ pyproj==3.6.0
 rioxarray==0.15.0
 xarray==2023.6.0
 streamlit_folium==0.25.0
-tempfile
