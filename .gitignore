@@ -3,8 +3,12 @@
 venv
 venv39_dem
 venv39_mws
+venv39_dem_streamlit
+venv39_mws_streamlit
 /jupyter/data-inputs/DEM
 /jupyter/data-inputs/leafmap
+/jupyter/data-inputs/FlowAcc
+/jupyter/data-inputs/IRL-boundary
 /jupyter/data-inputs/ImperviousArea
 /jupyter/data-inputs/NHD-Flowlines
 /jupyter/data-inputs/StreetNetwork
