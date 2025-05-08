@@ -1,4 +1,4 @@
-# Indian River Lagoon Smart Watershed Project - The Nature Conservancy and Arup
+# Indian River Lagoon Smart Watershed Project
 
 ## Purpose
 The "Microwatershed Impact Assessment" open-source tool, at a high-level, is a geospatial workflow which breaks down larger watersheds into smaller, more manageable ‘microwatersheds’ and allows users to determine locations of hydraulically connected sytems which include ponds that are optimal for smart control.
