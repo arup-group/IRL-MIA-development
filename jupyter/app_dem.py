@@ -9,46 +9,57 @@ import folium
 from folium.plugins import Draw
 from shapely.geometry import Polygon
 from streamlit_folium import st_folium
+import tempfile
 from leafmap import WhiteboxTools
 
 # Define a function for processing DEM
 def process_dem(aoi_polygon, dem_filename, output_path):
-    # Get the current working directory
-    cwd = os.getcwd()
+    # Create a temporary directory to store intermediate files
+    with tempfile.TemporaryDirectory() as temp_dir:
+        # Set up WhiteboxTools with the temporary directory as working directory
+        wbt = WhiteboxTools()
+        wbt.set_working_dir(temp_dir)
 
-    # Set up WhiteboxTools and set file paths for processing
-    wbt = WhiteboxTools()
-    leaf_path = fr'{cwd}\\data-inputs\\leafmap'
-    wbt.set_working_dir(leaf_path)
+        # Pull the DEM using leafmap
+        leafmap.get_3dep_dem(
+            aoi_polygon,
+            resolution=10,
+            output=os.path.join(temp_dir, f"{dem_filename}.tif"),
+            dst_crs="EPSG:4326",
+            to_cog=True
+        )
 
-    # Pull the DEM using leafmap
-    leafmap.get_3dep_dem(
-        aoi_polygon,
-        resolution=10,
-        output=f"{output_path}\\{dem_filename}.tif",
-        dst_crs="EPSG:4326",
-        to_cog=True
-    )
+        # Smooth the DEM with feature-preserving smoothing
+        smoothed_filename = f"{dem_filename}_smoothed"
+        wbt.feature_preserving_smoothing(
+            os.path.join(temp_dir, f"{dem_filename}.tif"),  # The input DEM filename
+            os.path.join(temp_dir, f"{smoothed_filename}.tif"),  # The output filename
+            filter=3  # Filter size
+        )
 
-    # Smooth the DEM with feature-preserving smoothing
-    smoothed_filename = fr"{dem_filename}_smoothed"
-    wbt.feature_preserving_smoothing(
-        f"{dem_filename}.tif",  # The input DEM filename
-        f"{smoothed_filename}.tif",  # The output filename
-        filter=3  # Filter size
-    )
+        # Breach depressions on the smoothed DEM
+        conditioned_dem_filename = f"{smoothed_filename}_conditioned"
+        wbt.breach_depressions(
+            os.path.join(temp_dir, f'{smoothed_filename}.tif'),  # Input DEM
+            os.path.join(temp_dir, f"{conditioned_dem_filename}.tif")  # Output name
+        )
 
-    # Breach depressions on the smoothed DEM
-    conditioned_dem_filename = f"{smoothed_filename}_conditioned"
-    wbt.breach_depressions(
-        f'{smoothed_filename}.tif',  # Input DEM
-        f"{conditioned_dem_filename}.tif"  # Output name
-    )
+        # Define the final path for the conditioned DEM
+        final_dem_path = os.path.join(output_path, f"{conditioned_dem_filename}.tif")
+        
+        # If the file already exists, remove it to avoid the error
+        if os.path.exists(final_dem_path):
+            os.remove(final_dem_path)
+        
+        # Move the conditioned DEM to the output path (permanent location)
+        os.rename(os.path.join(temp_dir, f"{conditioned_dem_filename}.tif"), final_dem_path)
 
-    return f"{conditioned_dem_filename}.tif"
+        # Return the path of the processed DEM (conditioned DEM)
+        return final_dem_path
 
 # Define a function for plotting the DEM
 def plot_dem(dem_path):
+    st.info("Plotting DEM...")
     # Open the DEM file
     with rasterio.open(dem_path) as src:
         dem = src.read(1)  # Read the first band
@@ -65,9 +76,14 @@ def plot_dem(dem_path):
     plt.ylabel("Latitude")
     plt.title("Digital Elevation Model (DEM)")
     plt.show()
+    st.info("Plotting complete!")
 
 # Define Streamlit app layout and functionality
 st.title("Draw a Polygon, Process DEM, and View Results")
+
+# Create a permanent output folder (outside of temporary directory)
+output_path = "processed_dem_files"
+os.makedirs(output_path, exist_ok=True)
 
 # Create the map and draw tool
 m = folium.Map(location=[27.6380, -80.3984], zoom_start=12)  # Vero Beach, Florida
@@ -92,10 +108,10 @@ with c2:
             try:
                 # Process DEM for the drawn polygon
                 st.info("Processing DEM...")
-                processed_dem_path = process_dem(polygon, "dem_filename", "output_path")
+                processed_dem_path = process_dem(polygon, "dem_filename", output_path)
 
                 # Plot the processed DEM (conditioned DEM)
-                st.success("DEM Processing Complete!")
+                st.info("DEM Processing Complete!")
                 plot_dem(processed_dem_path)
 
             except Exception as e:
