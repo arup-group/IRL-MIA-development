@@ -84,7 +84,7 @@ streamlit==1.40.0
 tenacity==9.0.0
 tifffile==2024.8.30
 toml==0.10.2
-tornado==6.4.1
+tornado==6.5.1
 traitlets==5.14.3
 typing_extensions==4.12.2
 urllib3==2.2.3

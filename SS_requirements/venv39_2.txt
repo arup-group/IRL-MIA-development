@@ -63,7 +63,7 @@ six==1.16.0
 snuggs==1.4.7
 stack-data==0.6.3
 tifffile==2024.8.30
-tornado==6.4.1
+tornado==6.5.1
 traitlets==5.14.3
 typing_extensions==4.12.2
 wcwidth==0.2.13
